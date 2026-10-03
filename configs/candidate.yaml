@@ -1,0 +1,26 @@
+# =============================================================================
+# CANDIDATE system version - a realistic proposed change:
+#   * new prompt (v2: concise + inline citations)
+#   * finer chunks with slightly less overlap
+#   * more retrieved chunks (top_k 4 -> 6)
+# This is the "PR under test" configuration for the demo and CI gate.
+# =============================================================================
+extends: default.yaml
+
+run:
+  system_version: candidate-v2
+
+system:
+  kind: rag
+  corpus_dir: data/corpus
+  chunk_size: 600
+  chunk_overlap: 100
+  top_k: 6
+  prompt_version: v2_concise_cited
+  max_context_chars: 12000
+  embedder:
+    name: ${LEDGER_EMBEDDER_NAME:-hashing_tfidf}
+    dim: 512
+    model: ${LEDGER_EMBEDDING_MODEL:-text-embedding-3-small}
+    base_url: ${LEDGER_EMBEDDING_BASE_URL:-}
+    api_key_env: LEDGER_EMBEDDING_API_KEY

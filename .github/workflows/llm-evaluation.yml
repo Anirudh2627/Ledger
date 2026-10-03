@@ -1,0 +1,200 @@
+name: LLM Evaluation Gate
+
+# -----------------------------------------------------------------------------
+# Regression gate for changes that can alter model behavior:
+# prompts, retrieval settings, evaluation configs, the golden dataset, or the
+# sample SUT. Runs baseline vs candidate evaluations and BLOCKS the merge when
+# the regression policy says FAIL.
+#
+# Provider modes:
+#   * default          - deterministic MOCK providers (offline, free, reproducible)
+#   * real LLM         - triggered manually (workflow_dispatch) or on schedule
+#                        when OPENAI-compatible secrets are configured.
+#
+# Exit-code contract of `scripts/ci/gate.sh` (wraps `ledger gate`):
+#   0 = PASS, 1 = FAIL, 2 = WARNING (non-blocking unless --fail-on-warning)
+# -----------------------------------------------------------------------------
+on:
+  pull_request:
+    paths:
+      - "configs/**"
+      - "datasets/**"
+      - "data/**"
+      - "src/ledger/systems/**"
+      - "src/ledger/judges/prompts.py"
+      - ".github/workflows/llm-evaluation.yml"
+  workflow_dispatch:
+    inputs:
+      baseline_config:
+        description: Baseline config file
+        default: configs/baseline.yaml
+        type: string
+      candidate_config:
+        description: Candidate config file
+        default: configs/candidate.yaml
+        type: string
+      use_real_provider:
+        description: Use the real LLM provider from repository secrets
+        default: false
+        type: boolean
+      limit:
+        description: Max test cases (empty = all)
+        default: ""
+        type: string
+  # Optional nightly gate against main with real providers (only runs when
+  # secrets exist; otherwise the mock path executes and costs nothing).
+  schedule:
+    - cron: "30 2 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llm-eval-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  evaluation-gate:
+    name: Baseline vs candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Fast checks (lint + unit tests)
+        run: |
+          ruff check src tests scripts datasets
+          pytest -m unit -q
+
+      - name: Resolve provider mode
+        id: mode
+        env:
+          USE_REAL: ${{ inputs.use_real_provider }}
+          HAS_KEY: ${{ secrets.LEDGER_PROVIDER_API_KEY != '' }}
+        run: |
+          if [ "${USE_REAL:-false}" = "true" ] && [ -n "$HAS_KEY" ]; then
+            echo "mock=0" >> "$GITHUB_OUTPUT"
+            echo "Real-provider mode: evaluations will call the configured API."
+          else
+            echo "mock=1" >> "$GITHUB_OUTPUT"
+            echo "Mock mode: deterministic offline evaluation."
+          fi
+
+      - name: Resolve configs
+        id: cfg
+        run: |
+          BASE="${{ inputs.baseline_config }}"
+          CAND="${{ inputs.candidate_config }}"
+          echo "baseline=${BASE:-configs/baseline.yaml}" >> "$GITHUB_OUTPUT"
+          echo "candidate=${CAND:-configs/candidate.yaml}" >> "$GITHUB_OUTPUT"
+          LIMIT="${{ inputs.limit }}"
+          echo "limit=${LIMIT}" >> "$GITHUB_OUTPUT"
+
+      # Baseline runs are cacheable: same config + same dataset + same code =>
+      # same results in mock mode. Real-provider mode skips the cache because
+      # model behavior can drift server-side.
+      - name: Cache baseline run (mock mode only)
+        if: steps.mode.outputs.mock == '1'
+        id: baseline-cache
+        uses: actions/cache@v4
+        with:
+          path: results/baseline-cache
+          key: >-
+            ledger-baseline-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+            ${{ hashFiles('configs/**', 'datasets/golden.jsonl',
+                        'data/corpus/**', 'src/ledger/**',
+                        'requirements.txt') }}
+
+      - name: Evaluate baseline
+        env:
+          LEDGER_PROVIDER_API_KEY: ${{ secrets.LEDGER_PROVIDER_API_KEY }}
+          LEDGER_PROVIDER_BASE_URL: ${{ secrets.LEDGER_PROVIDER_BASE_URL }}
+          LEDGER_PROVIDER_MODEL: ${{ secrets.LEDGER_PROVIDER_MODEL }}
+          LEDGER_JUDGE_API_KEY: ${{ secrets.LEDGER_JUDGE_API_KEY }}
+          LEDGER_JUDGE_BASE_URL: ${{ secrets.LEDGER_JUDGE_BASE_URL }}
+          LEDGER_JUDGE_MODEL: ${{ secrets.LEDGER_JUDGE_MODEL }}
+        run: |
+          set -euo pipefail
+          MOCK_FLAG=""
+          if [ "${{ steps.mode.outputs.mock }}" = "1" ]; then MOCK_FLAG="--mock"; fi
+          LIMIT_FLAG=""
+          if [ -n "${{ steps.cfg.outputs.limit }}" ]; then
+            LIMIT_FLAG="--limit ${{ steps.cfg.outputs.limit }}"
+          fi
+          CACHE_DIR="results/baseline-cache"
+          if [ "${{ steps.mode.outputs.mock }}" = "1" ] && [ -f "$CACHE_DIR/summary.json" ]; then
+            echo "Reusing cached baseline run from $CACHE_DIR"
+          else
+            ledger evaluate --config "${{ steps.cfg.outputs.baseline }}" \
+              --run-id baseline-cache $LIMIT_FLAG $MOCK_FLAG
+          fi
+
+      - name: Evaluate candidate
+        env:
+          LEDGER_PROVIDER_API_KEY: ${{ secrets.LEDGER_PROVIDER_API_KEY }}
+          LEDGER_PROVIDER_BASE_URL: ${{ secrets.LEDGER_PROVIDER_BASE_URL }}
+          LEDGER_PROVIDER_MODEL: ${{ secrets.LEDGER_PROVIDER_MODEL }}
+          LEDGER_JUDGE_API_KEY: ${{ secrets.LEDGER_JUDGE_API_KEY }}
+          LEDGER_JUDGE_BASE_URL: ${{ secrets.LEDGER_JUDGE_BASE_URL }}
+          LEDGER_JUDGE_MODEL: ${{ secrets.LEDGER_JUDGE_MODEL }}
+        run: |
+          set -euo pipefail
+          MOCK_FLAG=""
+          if [ "${{ steps.mode.outputs.mock }}" = "1" ]; then MOCK_FLAG="--mock"; fi
+          LIMIT_FLAG=""
+          if [ -n "${{ steps.cfg.outputs.limit }}" ]; then
+            LIMIT_FLAG="--limit ${{ steps.cfg.outputs.limit }}"
+          fi
+          ledger evaluate --config "${{ steps.cfg.outputs.candidate }}" \
+            --run-id candidate-current $LIMIT_FLAG $MOCK_FLAG
+
+      - name: Regression gate (baseline vs candidate)
+        id: gate
+        env:
+          REPORTS_DIR: reports
+        run: |
+          scripts/ci/gate.sh \
+            --baseline baseline-cache \
+            --candidate candidate-current \
+            --policy configs/policy.yaml
+
+      - name: Publish report to job summary
+        if: always()
+        run: |
+          latest="$(ls -t reports/comparison_*.md 2>/dev/null | head -n 1 || true)"
+          if [ -n "$latest" ]; then
+            {
+              echo "## Ledger Evaluation Gate"
+              echo ""
+              cat "$latest"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-evaluation-artifacts
+          path: |
+            reports/
+            results/*/summary.json
+            results/*/results.jsonl
+            experiments/index.jsonl
+          if-no-files-found: warn
+          retention-days: 30

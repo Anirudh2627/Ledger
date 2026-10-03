@@ -1,0 +1,92 @@
+# =============================================================================
+# Ledger default configuration
+# =============================================================================
+# Every other config extends this file and overrides only what differs.
+# Secrets NEVER appear here - providers reference env vars via `api_key_env`.
+# Relative paths are resolved from the current working directory (run Ledger
+# from the repository root).
+# =============================================================================
+config_version: 1
+
+run:
+  # Identifier recorded with every result of this run (used in reports/CI).
+  system_version: dev
+  # Global seed: mock provider behavior, bootstrap resampling.
+  seed: 1337
+  # SUT generation and judging are I/O bound; keep modest for shared APIs.
+  max_concurrency: 4
+  sut_retries: 1
+
+dataset:
+  path: datasets/golden.jsonl
+  # limit: 10          # uncomment for smoke runs
+  # categories: [refusal, adversarial]
+
+# Provider used BY the system under test for generation.
+# `${VAR:-default}` interpolation reads from the environment / .env file.
+provider:
+  name: ${LEDGER_PROVIDER_NAME:-mock}        # mock | openai_compat
+  model: ${LEDGER_PROVIDER_MODEL:-mock-llm-v1}
+  base_url: ${LEDGER_PROVIDER_BASE_URL:-}
+  api_key_env: LEDGER_PROVIDER_API_KEY
+  temperature: 0.0                           # keep 0 for eval reproducibility
+  max_tokens: 512
+  timeout_s: 60
+  max_retries: 2
+
+judge:
+  enabled: true
+  name: rubric
+  dimensions: [correctness, relevance, groundedness, instruction_following]
+  # Weighted overall; correctness and groundedness carry double weight.
+  weights:
+    correctness: 2.0
+    groundedness: 2.0
+    relevance: 1.0
+    instruction_following: 1.0
+  # A case passes at weighted overall >= 3.5 (critical cases: >= 4.0).
+  pass_threshold: 3.5
+  critical_pass_threshold: 4.0
+  # exclude: drop failed verdicts from judge aggregates (still reported);
+  # fail_case: count the case as failed; abort: stop the run.
+  on_failure: exclude
+  max_retries: 2
+  max_input_chars: 12000
+  provider:
+    name: ${LEDGER_JUDGE_NAME:-mock}         # mock | openai_compat
+    model: ${LEDGER_JUDGE_MODEL:-mock-judge-v1}
+    base_url: ${LEDGER_JUDGE_BASE_URL:-}
+    api_key_env: LEDGER_JUDGE_API_KEY
+    temperature: 0.0
+    max_tokens: 700
+    timeout_s: 60
+    max_retries: 2
+    json_mode: true
+
+metrics:
+  deterministic:
+    - exact_match
+    - token_f1
+    - normalized_similarity
+    - key_term_coverage
+    - citation_presence
+    - retrieval_hit
+    - refusal_match
+    - structured_output_validity
+    - length_compliance
+
+evaluation:
+  # Used only when the judge is disabled or failed (on_failure=exclude):
+  # pass when the deterministic composite reaches this value.
+  fallback_pass_threshold: 0.5
+
+# Regression policy consumed by `ledger compare` / `ledger gate`.
+policy_path: configs/policy.yaml
+
+output:
+  results_dir: results
+  reports_dir: reports
+  experiments_dir: experiments
+
+logging:
+  level: INFO

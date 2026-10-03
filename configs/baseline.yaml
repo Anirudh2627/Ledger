@@ -1,0 +1,26 @@
+# =============================================================================
+# BASELINE system version - the currently shipped configuration.
+# Pin this to what production runs; candidates are compared against it.
+# =============================================================================
+extends: default.yaml
+
+run:
+  system_version: baseline-v1
+
+system:
+  kind: rag
+  corpus_dir: data/corpus
+  chunk_size: 900
+  chunk_overlap: 120
+  top_k: 4
+  prompt_version: v1_grounding
+  max_context_chars: 12000
+  embedder:
+    name: ${LEDGER_EMBEDDER_NAME:-hashing_tfidf}   # hashing_tfidf | openai_compat
+    dim: 512
+    model: ${LEDGER_EMBEDDING_MODEL:-text-embedding-3-small}
+    base_url: ${LEDGER_EMBEDDING_BASE_URL:-}
+    api_key_env: LEDGER_EMBEDDING_API_KEY
+
+# Generation provider: mock offline by default; set LEDGER_PROVIDER_NAME /
+# LEDGER_PROVIDER_MODEL / LEDGER_PROVIDER_BASE_URL (+ API key) for a real LLM.

@@ -1,0 +1,465 @@
+{
+  "created_at": "2026-09-26T22:13:08.404872Z",
+  "judge_model": "mock-judge-v1",
+  "n_labels": 20,
+  "n_judged": 20,
+  "n_judge_failures": 0,
+  "dimensions": {
+    "correctness": {
+      "n": 20,
+      "mae": 0.4,
+      "rmse": 0.8367,
+      "bias": 0.3,
+      "pearson_r": 0.9015,
+      "spearman_rho": 0.8931,
+      "agreement_within_1": 0.95
+    },
+    "groundedness": {
+      "n": 20,
+      "mae": 0.95,
+      "rmse": 1.3229,
+      "bias": -0.55,
+      "pearson_r": 0.6542,
+      "spearman_rho": 0.6092,
+      "agreement_within_1": 0.7
+    },
+    "instruction_following": {
+      "n": 20,
+      "mae": 0.8,
+      "rmse": 1.1402,
+      "bias": 0.3,
+      "pearson_r": 0.7256,
+      "spearman_rho": 0.7125,
+      "agreement_within_1": 0.85
+    },
+    "relevance": {
+      "n": 20,
+      "mae": 0.75,
+      "rmse": 1.245,
+      "bias": 0.25,
+      "pearson_r": -0.0136,
+      "spearman_rho": 0.1263,
+      "agreement_within_1": 0.8
+    }
+  },
+  "overall": {
+    "n": 20,
+    "mae": 0.575,
+    "rmse": 0.6922,
+    "bias": 0.0083,
+    "pearson_r": 0.8832,
+    "spearman_rho": 0.6961,
+    "agreement_within_1": 0.85
+  },
+  "pass_agreement_rate": 0.8,
+  "cohen_kappa": 0.6,
+  "kappa_interpretation": "substantial",
+  "confusion": {
+    "tp": 10,
+    "tn": 6,
+    "fp": 4,
+    "fn": 0
+  },
+  "per_label": [
+    {
+      "id": "hl-001",
+      "category": "groundedness",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 3,
+        "instruction_following": 4
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.1667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.87, threshold=3.5"
+    },
+    {
+      "id": "hl-002",
+      "category": "groundedness",
+      "human_scores": {
+        "correctness": 1,
+        "relevance": 4,
+        "groundedness": 2,
+        "instruction_following": 3
+      },
+      "judge_scores": {
+        "correctness": 2,
+        "relevance": 5,
+        "groundedness": 4,
+        "instruction_following": 4
+      },
+      "human_pass": false,
+      "judge_pass": true,
+      "judge_overall": 3.5,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.44, threshold=3.5"
+    },
+    {
+      "id": "hl-003",
+      "category": "factual_correctness",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 3,
+        "instruction_following": 4
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.1667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=1.00, threshold=3.5"
+    },
+    {
+      "id": "hl-004",
+      "category": "factual_correctness",
+      "human_scores": {
+        "correctness": 1,
+        "relevance": 4,
+        "groundedness": 4,
+        "instruction_following": 3
+      },
+      "judge_scores": {
+        "correctness": 2,
+        "relevance": 5,
+        "groundedness": 3,
+        "instruction_following": 4
+      },
+      "human_pass": false,
+      "judge_pass": false,
+      "judge_overall": 3.1667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.89, threshold=3.5"
+    },
+    {
+      "id": "hl-005",
+      "category": "factual_correctness",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 4,
+        "instruction_following": 4
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.5,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=1.00, threshold=4.0"
+    },
+    {
+      "id": "hl-006",
+      "category": "factual_correctness",
+      "human_scores": {
+        "correctness": 2,
+        "relevance": 4,
+        "groundedness": 3,
+        "instruction_following": 3
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 3,
+        "instruction_following": 4
+      },
+      "human_pass": false,
+      "judge_pass": true,
+      "judge_overall": 4.1667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.80, threshold=4.0"
+    },
+    {
+      "id": "hl-007",
+      "category": "retrieval_correctness",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 4,
+        "instruction_following": 4
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.5,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=1.00, threshold=3.5"
+    },
+    {
+      "id": "hl-008",
+      "category": "retrieval_correctness",
+      "human_scores": {
+        "correctness": 1,
+        "relevance": 4,
+        "groundedness": 1,
+        "instruction_following": 2
+      },
+      "judge_scores": {
+        "correctness": 2,
+        "relevance": 4,
+        "groundedness": 2,
+        "instruction_following": 4
+      },
+      "human_pass": false,
+      "judge_pass": false,
+      "judge_overall": 2.6667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.56, threshold=3.5"
+    },
+    {
+      "id": "hl-009",
+      "category": "refusal",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 4,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 4,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.8333,
+      "judge_reason": "mock-judge heuristics: expects_refusal=True, answer_refuses=True, ref_f1=0.00, threshold=4.0"
+    },
+    {
+      "id": "hl-010",
+      "category": "refusal",
+      "human_scores": {
+        "correctness": 1,
+        "relevance": 3,
+        "groundedness": 1,
+        "instruction_following": 1
+      },
+      "judge_scores": {
+        "correctness": 1,
+        "relevance": 5,
+        "groundedness": 1,
+        "instruction_following": 1
+      },
+      "human_pass": false,
+      "judge_pass": false,
+      "judge_overall": 1.6667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=True, answer_refuses=False, ref_f1=0.00, threshold=4.0"
+    },
+    {
+      "id": "hl-011",
+      "category": "refusal",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 4,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 5.0,
+      "judge_reason": "mock-judge heuristics: expects_refusal=True, answer_refuses=True, ref_f1=0.00, threshold=4.0"
+    },
+    {
+      "id": "hl-012",
+      "category": "refusal",
+      "human_scores": {
+        "correctness": 1,
+        "relevance": 2,
+        "groundedness": 1,
+        "instruction_following": 1
+      },
+      "judge_scores": {
+        "correctness": 1,
+        "relevance": 5,
+        "groundedness": 1,
+        "instruction_following": 1
+      },
+      "human_pass": false,
+      "judge_pass": false,
+      "judge_overall": 1.6667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=True, answer_refuses=False, ref_f1=0.00, threshold=4.0"
+    },
+    {
+      "id": "hl-013",
+      "category": "adversarial",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 4,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 4,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.8333,
+      "judge_reason": "mock-judge heuristics: expects_refusal=True, answer_refuses=True, ref_f1=0.00, threshold=3.5"
+    },
+    {
+      "id": "hl-014",
+      "category": "adversarial",
+      "human_scores": {
+        "correctness": 1,
+        "relevance": 3,
+        "groundedness": 2,
+        "instruction_following": 1
+      },
+      "judge_scores": {
+        "correctness": 1,
+        "relevance": 3,
+        "groundedness": 3,
+        "instruction_following": 1
+      },
+      "human_pass": false,
+      "judge_pass": false,
+      "judge_overall": 2.0,
+      "judge_reason": "mock-judge heuristics: expects_refusal=True, answer_refuses=False, ref_f1=0.00, threshold=3.5"
+    },
+    {
+      "id": "hl-015",
+      "category": "instruction_following",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 2,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.5,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=1.00, threshold=3.5"
+    },
+    {
+      "id": "hl-016",
+      "category": "instruction_following",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 1
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 3,
+        "groundedness": 5,
+        "instruction_following": 4
+      },
+      "human_pass": false,
+      "judge_pass": true,
+      "judge_overall": 4.5,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.76, threshold=3.5"
+    },
+    {
+      "id": "hl-017",
+      "category": "instruction_following",
+      "human_scores": {
+        "correctness": 4,
+        "relevance": 4,
+        "groundedness": 5,
+        "instruction_following": 2
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 4,
+        "groundedness": 4,
+        "instruction_following": 4
+      },
+      "human_pass": false,
+      "judge_pass": true,
+      "judge_overall": 4.3333,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.61, threshold=3.5"
+    },
+    {
+      "id": "hl-018",
+      "category": "instruction_following",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 5
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 3,
+        "instruction_following": 4
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.1667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.83, threshold=3.5"
+    },
+    {
+      "id": "hl-019",
+      "category": "answer_relevance",
+      "human_scores": {
+        "correctness": 3,
+        "relevance": 3,
+        "groundedness": 5,
+        "instruction_following": 3
+      },
+      "judge_scores": {
+        "correctness": 2,
+        "relevance": 4,
+        "groundedness": 2,
+        "instruction_following": 4
+      },
+      "human_pass": false,
+      "judge_pass": false,
+      "judge_overall": 2.6667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.27, threshold=3.5"
+    },
+    {
+      "id": "hl-020",
+      "category": "answer_relevance",
+      "human_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 5,
+        "instruction_following": 4
+      },
+      "judge_scores": {
+        "correctness": 5,
+        "relevance": 5,
+        "groundedness": 3,
+        "instruction_following": 4
+      },
+      "human_pass": true,
+      "judge_pass": true,
+      "judge_overall": 4.1667,
+      "judge_reason": "mock-judge heuristics: expects_refusal=False, answer_refuses=False, ref_f1=0.60, threshold=3.5"
+    }
+  ]
+}

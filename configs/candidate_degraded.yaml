@@ -1,0 +1,25 @@
+# =============================================================================
+# INTENTIONALLY DEGRADED candidate - exists ONLY to demonstrate the gate
+# blocking a bad change (`make demo-fail` / `ledger demo --candidate-config
+# configs/candidate_degraded.yaml`).
+#
+# The change it simulates: someone "optimizes for cost/latency" by shrinking
+# context (top_k=1, tiny chunks) and swapping in a prompt with no grounding or
+# citation instructions. Do not copy these values into a real config.
+# =============================================================================
+extends: default.yaml
+
+run:
+  system_version: candidate-degraded-demo
+
+system:
+  kind: rag
+  corpus_dir: data/corpus
+  chunk_size: 240
+  chunk_overlap: 20
+  top_k: 1
+  prompt_version: v0_sloppy
+  max_context_chars: 2000
+  embedder:
+    name: hashing_tfidf
+    dim: 512

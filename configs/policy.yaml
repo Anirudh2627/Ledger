@@ -1,0 +1,64 @@
+# =============================================================================
+# Regression policy - the CI quality gate contract.
+# All thresholds live HERE, never in Python code. Values are on the normalized
+# 0-1 quality scale unless noted.
+#
+# Decision semantics (see docs/evaluation-methodology.md):
+#   FAIL    - statistically supported degradation beyond a fail threshold,
+#             critical-case regression, count limits exceeded, or judge
+#             failure rate too high (untrustworthy evaluation).
+#   WARNING - degradation in the warning band, or beyond a threshold but NOT
+#             statistically supported (when require_significance is true), or
+#             structural problems (dataset mismatch, tiny sample).
+#   PASS    - nothing above triggered.
+# =============================================================================
+
+# A degradation only FAILs when the paired bootstrap supports it
+# (CI excludes zero, or p < significance_alpha). Otherwise -> WARNING.
+require_significance: true
+significance_alpha: 0.05
+
+# Comparisons with fewer paired cases than this emit a low-statistical-power
+# WARNING (not a FAIL) - useful when running with --limit during development.
+min_paired_cases: 10
+
+# Primary quality signal (weighted judge overall, normalized 0-1).
+overall:
+  absolute: 0.03          # > 3 percentage points drop => FAIL (if significant)
+  relative: null          # e.g. 0.10 = "10% worse than baseline" (optional)
+  warning_fraction: 0.5   # WARNING from 1.5 points drop onwards
+
+# Per-category drops of the overall score.
+categories:
+  absolute: 0.05
+  warning_fraction: 0.5
+
+# The slice of cases flagged `critical: true` in the dataset.
+critical:
+  absolute: 0.02          # critical cases get the tightest band
+  warning_fraction: 0.5
+
+# Optional per-metric thresholds (any metric tracked in results).
+# retrieval_hit regression localizes problems to the retrieval stage.
+metrics:
+  retrieval_hit:
+    absolute: 0.05
+  refusal_match:
+    absolute: 0.05
+
+counts:
+  # Candidate tests that PASSED on baseline but FAIL now.
+  max_newly_failing_tests: 3
+  # Absolute failing-test budget for the candidate; null = disabled
+  # (pre-existing failures are a dataset/system problem, not a regression).
+  max_failed_tests: null
+  # Newly failing CRITICAL tests allowed (0 = any critical regression blocks).
+  max_critical_failures: 0
+  # If the judge fails on more than this fraction of cases, the evaluation
+  # itself is untrustworthy => FAIL.
+  max_judge_failure_rate: 0.1
+
+bootstrap:
+  n_samples: 2000
+  seed: 1337
+  confidence: 0.95

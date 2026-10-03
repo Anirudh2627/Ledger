@@ -1,0 +1,10 @@
+# Runtime dependencies - exact versions verified against this repository.
+# Install with:  pip install -r requirements.txt
+# (pyproject.toml declares compatible ranges; this file pins what was tested.)
+pydantic==2.13.5
+pydantic-settings==2.15.0
+PyYAML==6.0.3
+numpy==2.4.6
+httpx==0.28.1
+typer==0.27.2
+rich==15.0.0

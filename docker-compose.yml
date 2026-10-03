@@ -1,0 +1,45 @@
+# =============================================================================
+# Ledger docker-compose - offline evaluation demo + optional real-provider run
+# =============================================================================
+# Quick start (no secrets needed):
+#   docker compose run --rm ledger demo
+#   docker compose run --rm ledger demo --candidate-config configs/candidate_degraded.yaml
+#
+# Real providers (create a .env from .env.example first):
+#   LEDGER_PROVIDER_NAME=openai_compat docker compose run --rm eval-real
+#
+# Outputs land in ./results and ./reports via bind mounts.
+# =============================================================================
+services:
+  ledger:
+    build: .
+    image: ledger:latest
+    environment:
+      LEDGER_FORCE_MOCK: "1"
+      LEDGER_LOG_LEVEL: ${LEDGER_LOG_LEVEL:-INFO}
+    volumes:
+      - ./results:/app/results
+      - ./reports:/app/reports
+      - ./experiments:/app/experiments
+    command: ["demo"]
+
+  # Same image, real-provider configuration read from the environment/.env.
+  # API keys are passed through at runtime and never stored in the image.
+  eval-real:
+    image: ledger:latest
+    profiles: ["real"]
+    environment:
+      LEDGER_PROVIDER_NAME: ${LEDGER_PROVIDER_NAME:-openai_compat}
+      LEDGER_PROVIDER_BASE_URL: ${LEDGER_PROVIDER_BASE_URL:-}
+      LEDGER_PROVIDER_MODEL: ${LEDGER_PROVIDER_MODEL:-}
+      LEDGER_PROVIDER_API_KEY: ${LEDGER_PROVIDER_API_KEY:-}
+      LEDGER_JUDGE_NAME: ${LEDGER_JUDGE_NAME:-openai_compat}
+      LEDGER_JUDGE_BASE_URL: ${LEDGER_JUDGE_BASE_URL:-}
+      LEDGER_JUDGE_MODEL: ${LEDGER_JUDGE_MODEL:-}
+      LEDGER_JUDGE_API_KEY: ${LEDGER_JUDGE_API_KEY:-}
+      LEDGER_LOG_LEVEL: ${LEDGER_LOG_LEVEL:-INFO}
+    volumes:
+      - ./results:/app/results
+      - ./reports:/app/reports
+      - ./experiments:/app/experiments
+    command: ["evaluate", "--config", "configs/baseline.yaml"]
