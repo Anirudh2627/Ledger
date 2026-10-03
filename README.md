@@ -526,8 +526,4 @@ Markdown/JSON equivalents: [`reports/example/comparison_fail_mock.md`](reports/e
 
 ---
 
-## License
 
-MIT. See headers in source files. The fictional "Helios Data Platform"
-documentation in `data/corpus/` is invented for this repository and describes
-no real product.
