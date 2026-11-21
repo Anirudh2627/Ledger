@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 
 import httpx
+import numpy as np
 
 from ledger.config.settings import EmbedderConfig, ProviderConfig
 from ledger.core.interfaces import LLMProvider
@@ -187,26 +188,29 @@ class OpenAICompatEmbedder:
 
     def __init__(self, config: EmbedderConfig, *, api_key: str | None = None) -> None:
         self._config = config
+        self.dim = config.dim
         self._api_key = api_key if api_key is not None else config.resolved_api_key()
         if not config.base_url:
             raise ProviderError("embedder.base_url is required for openai_compat embedder")
         self._endpoint = config.base_url.rstrip("/") + "/embeddings"
 
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        """Embed a list of texts (batched), returning L2-normalized vectors."""
-        import numpy as np
+    def fit(self, texts: list[str]) -> None:
+        """Remote embeddings are stateless, so fitting is a no-op."""
+        return None
 
+    def encode(self, texts: list[str]) -> np.ndarray:
+        """Embed a list of texts (batched), returning L2-normalized vectors."""
         vectors: list[list[float]] = []
         batch_size = self._config.batch_size
         for start in range(0, len(texts), batch_size):
             batch = texts[start : start + batch_size]
             vectors.extend(self._encode_batch(batch))
         if not vectors:
-            return []
+            return np.zeros((0, self.dim), dtype=np.float64)
         matrix = np.asarray(vectors, dtype=np.float64)
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
-        return (matrix / norms).tolist()
+        return matrix / norms
 
     def _encode_batch(self, batch: list[str]) -> list[list[float]]:
         last_error: Exception | None = None

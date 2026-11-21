@@ -5,8 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ledger.config.settings import RagSystemConfig
+from ledger.config.settings import EmbedderConfig, RagSystemConfig
 from ledger.providers.mock import MockLLMProvider
+from ledger.providers.openai_compat import OpenAICompatEmbedder
 from ledger.systems.rag.chunking import Chunk, Document, chunk_document, load_corpus
 from ledger.systems.rag.embeddings import HashingTfIdfEmbedder
 from ledger.systems.rag.prompts import available_prompt_versions, get_prompt_template
@@ -134,6 +135,97 @@ def test_hashing_embedder_similar_texts_closer() -> None:
 def test_hashing_embedder_min_dim() -> None:
     with pytest.raises(ValueError):
         HashingTfIdfEmbedder(dim=8)
+
+
+class _EmbeddingResponse:
+    def __init__(self, data: dict[str, object]) -> None:
+        self._data = data
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return self._data
+
+
+class _EmbeddingClient:
+    def __init__(self, *, timeout: float) -> None:
+        self.timeout = timeout
+
+    def __enter__(self) -> "_EmbeddingClient":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def post(
+        self,
+        endpoint: str,
+        *,
+        json: dict[str, object],
+        headers: dict[str, str],
+    ) -> _EmbeddingResponse:
+        texts = json["input"]
+        assert isinstance(texts, list)
+        items = [
+            {
+                "index": index,
+                "embedding": [float(len(text)), 1.0] + [0.0] * 30,
+            }
+            for index, text in reversed(list(enumerate(texts)))
+        ]
+        return _EmbeddingResponse({"data": items})
+
+
+def _remote_embedder(batch_size: int = 64) -> OpenAICompatEmbedder:
+    config = EmbedderConfig(
+        name="openai_compat",
+        dim=32,
+        base_url="http://embedding.test/v1",
+        batch_size=batch_size,
+    )
+    return OpenAICompatEmbedder(config, api_key="test-key")
+
+
+def test_remote_embedder_returns_numpy_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+    matrix = _remote_embedder().encode(["one", "three"])
+
+    assert isinstance(matrix, np.ndarray)
+    assert matrix.shape == (2, 32)
+    assert np.issubdtype(matrix.dtype, np.number)
+
+
+def test_remote_embedder_empty_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+    matrix = _remote_embedder().encode([])
+
+    assert isinstance(matrix, np.ndarray)
+    assert matrix.shape == (0, 32)
+    assert np.issubdtype(matrix.dtype, np.number)
+
+
+def test_remote_embedder_fit_exists_and_is_callable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+    embedder = _remote_embedder()
+
+    embedder.fit(["alpha", "beta"])
+    assert embedder.dim == 32
+
+
+def test_remote_embedder_multiple_batches_preserve_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+    embedder = _remote_embedder(batch_size=2)
+    texts = ["a", "bb", "ccc", "dddd", "eeeee"]
+
+    matrix = embedder.encode(texts)
+
+    assert matrix.shape == (5, 32)
+    lengths = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    expected = lengths / np.sqrt(lengths**2 + 1.0)
+    assert np.allclose(matrix[:, 0], expected)
 
 
 # ---------------------------------------------------------------------------
