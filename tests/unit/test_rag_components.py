@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
 from ledger.config.settings import EmbedderConfig, RagSystemConfig
 from ledger.providers.mock import MockLLMProvider
-from ledger.providers.openai_compat import OpenAICompatEmbedder, _headers
+from ledger.providers.openai_compat import OpenAICompatEmbedder, ProviderError, _headers
 from ledger.systems.rag.chunking import Chunk, Document, chunk_document, load_corpus
 from ledger.systems.rag.embeddings import HashingTfIdfEmbedder
 from ledger.systems.rag.prompts import available_prompt_versions, get_prompt_template
@@ -138,17 +140,21 @@ def test_hashing_embedder_min_dim() -> None:
 
 
 class _EmbeddingResponse:
-    def __init__(self, data: dict[str, object]) -> None:
+    def __init__(self, data: dict[str, object] | Exception) -> None:
         self._data = data
 
     def raise_for_status(self) -> None:
         return None
 
     def json(self) -> dict[str, object]:
+        if isinstance(self._data, Exception):
+            raise self._data
         return self._data
 
 
 class _EmbeddingClient:
+    response: dict[str, object] | Exception | None = None
+
     def __init__(self, *, timeout: float) -> None:
         self.timeout = timeout
 
@@ -167,6 +173,8 @@ class _EmbeddingClient:
     ) -> _EmbeddingResponse:
         texts = json["input"]
         assert isinstance(texts, list)
+        if type(self).response is not None:
+            return _EmbeddingResponse(type(self).response)
         items = [
             {
                 "index": index,
@@ -226,6 +234,192 @@ def test_remote_embedder_multiple_batches_preserve_order(
     lengths = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
     expected = lengths / np.sqrt(lengths**2 + 1.0)
     assert np.allclose(matrix[:, 0], expected)
+
+
+@pytest.mark.parametrize(
+    ("embedding", "include_embedding", "message"),
+    [
+        (None, False, "missing 'embedding'"),
+        (None, True, "malformed"),
+        ([], True, "empty"),
+        (1.0, True, "malformed"),
+        (True, True, "malformed"),
+        ("not-a-list", True, "malformed"),
+        (["bad", 0.0] + [0.0] * 30, True, "numeric"),
+        ([1.0] * 31, True, "dimension"),
+        ([float("nan")] + [0.0] * 31, True, "finite"),
+        ([float("inf")] + [0.0] * 31, True, "finite"),
+        ([float("-inf")] + [0.0] * 31, True, "finite"),
+    ],
+)
+def test_remote_embedder_rejects_invalid_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+    embedding: object,
+    include_embedding: bool,
+    message: str,
+) -> None:
+    item: dict[str, object] = {"index": 0}
+    if include_embedding:
+        item["embedding"] = embedding
+    monkeypatch.setattr(_EmbeddingClient, "response", {"data": [item]})
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+    monkeypatch.setattr("ledger.providers.openai_compat.time.sleep", lambda delay: None)
+
+    with pytest.raises(ProviderError, match=message):
+        _remote_embedder().encode(["one"])
+
+
+def test_remote_embedder_rejects_ragged_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = {
+        "data": [
+            {"index": 0, "embedding": [1.0] * 32},
+            {"index": 1, "embedding": [1.0] * 31},
+        ]
+    }
+    monkeypatch.setattr(_EmbeddingClient, "response", data)
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+
+    with pytest.raises(ProviderError, match="dimension|ragged"):
+        _remote_embedder().encode(["one", "two"])
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({}, "malformed embedding response"),
+        ({"data": None}, "malformed embedding response"),
+        ({"data": {}}, "malformed embedding response"),
+        ({"data": ["bad-item"]}, "malformed embedding response"),
+        ({"data": [{}]}, "malformed embedding response"),
+        ({"data": [{"index": "0", "embedding": [1.0] * 32}]}, "index"),
+        ({"data": [{"index": 0.0, "embedding": [1.0] * 32}]}, "index"),
+        ({"data": [{"index": True, "embedding": [1.0] * 32}]}, "index"),
+    ],
+)
+def test_remote_embedder_rejects_malformed_responses(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+    message: str,
+) -> None:
+    monkeypatch.setattr(_EmbeddingClient, "response", payload)
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+    monkeypatch.setattr("ledger.providers.openai_compat.time.sleep", lambda delay: None)
+
+    with pytest.raises(ProviderError, match=message):
+        _remote_embedder().encode(["one"])
+
+
+@pytest.mark.parametrize(
+    ("items", "message"),
+    [
+        ([{"index": 0, "embedding": [1.0] * 32}], "response count"),
+        (
+            [
+                {"index": 0, "embedding": [1.0] * 32},
+                {"index": 1, "embedding": [1.0] * 32},
+                {"index": 0, "embedding": [1.0] * 32},
+            ],
+            "response count",
+        ),
+        (
+            [
+                {"index": 0, "embedding": [1.0] * 32},
+                {"index": 0, "embedding": [1.0] * 32},
+            ],
+            "duplicate|unique",
+        ),
+        (
+            [
+                {"index": 0, "embedding": [1.0] * 32},
+                {"index": 2, "embedding": [1.0] * 32},
+            ],
+            "missing|index",
+        ),
+        (
+            [
+                {"index": 0, "embedding": [1.0] * 32},
+                {"index": -1, "embedding": [1.0] * 32},
+            ],
+            "out of range",
+        ),
+        (
+            [
+                {"index": 0, "embedding": [1.0] * 32},
+                {"index": 2.0, "embedding": [1.0] * 32},
+            ],
+            "integer|index",
+        ),
+        (
+            [
+                {"index": 0, "embedding": [1.0] * 32},
+                {"index": True, "embedding": [1.0] * 32},
+            ],
+            "integer|index",
+        ),
+    ],
+)
+def test_remote_embedder_rejects_invalid_indexes_or_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    items: list[dict[str, object]],
+    message: str,
+) -> None:
+    monkeypatch.setattr(_EmbeddingClient, "response", {"data": items})
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+
+    with pytest.raises(ProviderError, match=message):
+        _remote_embedder().encode(["one", "two"])
+
+
+def test_remote_embedder_rejects_malformed_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _EmbeddingClient,
+        "response",
+        json.JSONDecodeError("invalid JSON", "{bad", 1),
+    )
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+
+    with pytest.raises(ProviderError, match="malformed embedding response"):
+        _remote_embedder().encode(["one"])
+
+
+def test_remote_embedder_restores_out_of_order_indexes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = {
+        "data": [
+            {"index": 1, "embedding": [0.0, 1.0] + [0.0] * 30},
+            {"index": 0, "embedding": [1.0, 0.0] + [0.0] * 30},
+        ]
+    }
+    monkeypatch.setattr(_EmbeddingClient, "response", data)
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+
+    matrix = _remote_embedder().encode(["first", "second"])
+
+    assert matrix.shape == (2, 32)
+    assert np.allclose(matrix[0], [1.0, 0.0] + [0.0] * 30)
+    assert np.allclose(matrix[1], [0.0, 1.0] + [0.0] * 30)
+
+
+def test_remote_embedder_preserves_zero_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = {
+        "data": [
+            {"index": 0, "embedding": [0.0] * 32},
+        ]
+    }
+    monkeypatch.setattr(_EmbeddingClient, "response", data)
+    monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
+
+    matrix = _remote_embedder().encode(["zero"])
+
+    assert matrix.shape == (1, 32)
+    assert np.array_equal(matrix, np.zeros((1, 32), dtype=np.float64))
 
 
 def test_api_headers_use_bearer_token_and_preserve_custom_headers() -> None:

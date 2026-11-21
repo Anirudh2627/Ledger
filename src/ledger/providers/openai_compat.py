@@ -14,7 +14,10 @@ Robustness features:
 
 from __future__ import annotations
 
+import json
+import math
 import time
+from numbers import Real
 
 import httpx
 import numpy as np
@@ -223,9 +226,12 @@ class OpenAICompatEmbedder:
                         headers=_headers(self._api_key, {}),
                     )
                     response.raise_for_status()
-                    data = response.json()
-                items = sorted(data["data"], key=lambda d: d["index"])
-                return [list(map(float, item["embedding"])) for item in items]
+                    try:
+                        data = response.json()
+                    except (json.JSONDecodeError, ValueError) as exc:
+                        raise ProviderError(
+                            f"malformed embedding response JSON: {exc}"
+                        ) from exc
             except (httpx.HTTPStatusError, httpx.TransportError, KeyError, TypeError) as exc:
                 last_error = ProviderError(f"embedding request failed: {exc}")
                 if isinstance(exc, httpx.HTTPStatusError):
@@ -234,8 +240,100 @@ class OpenAICompatEmbedder:
                         raise last_error from exc
                 if attempt < self._config_batch_attempts() - 1:
                     time.sleep(_backoff_seconds(attempt, None))
+                continue
+            return self._validate_embedding_response(data, len(batch))
         assert last_error is not None
         raise last_error
+
+    def _validate_embedding_response(
+        self,
+        data: object,
+        batch_size: int,
+    ) -> list[list[float]]:
+        if not isinstance(data, dict):
+            raise ProviderError("malformed embedding response: top-level JSON must be an object")
+        if "data" not in data:
+            raise ProviderError("malformed embedding response: missing 'data'")
+
+        items = data["data"]
+        if not isinstance(items, list):
+            raise ProviderError("malformed embedding response: 'data' must be a list")
+        if len(items) != batch_size:
+            raise ProviderError(
+                f"malformed embedding response: response count {len(items)} "
+                f"does not match batch size {batch_size}"
+            )
+
+        vectors: list[list[float] | None] = [None] * batch_size
+        seen_indexes: set[int] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                raise ProviderError("malformed embedding response: each item must be an object")
+            if "index" not in item:
+                raise ProviderError("malformed embedding response: item missing 'index'")
+            if "embedding" not in item:
+                raise ProviderError("malformed embedding response: item missing 'embedding'")
+
+            index = item["index"]
+            if isinstance(index, bool) or not isinstance(index, int):
+                raise ProviderError("malformed embedding response: embedding index must be an integer")
+            if index < 0 or index >= batch_size:
+                raise ProviderError(
+                    f"malformed embedding response: embedding index {index} out of range "
+                    f"[0, {batch_size - 1}]"
+                )
+            if index in seen_indexes:
+                raise ProviderError(
+                    f"malformed embedding response: duplicate embedding index {index}"
+                )
+            seen_indexes.add(index)
+
+            embedding = item["embedding"]
+            if isinstance(embedding, (str, bytes, bytearray)) or not isinstance(
+                embedding, (list, tuple)
+            ):
+                raise ProviderError(
+                    "malformed embedding response: malformed embedding; "
+                    "embedding must be a non-empty sequence"
+                )
+            if not embedding:
+                raise ProviderError("malformed embedding response: embedding must not be empty")
+            if len(embedding) != self.dim:
+                raise ProviderError(
+                    f"malformed embedding response: embedding dimension {len(embedding)} "
+                    f"does not match configured dimension {self.dim}"
+                )
+
+            vector: list[float] = []
+            for value in embedding:
+                if isinstance(value, bool) or not isinstance(value, Real):
+                    raise ProviderError(
+                        "malformed embedding response: malformed embedding values; "
+                        "embedding values must be numeric"
+                    )
+                try:
+                    number = float(value)
+                except (OverflowError, ValueError, TypeError) as exc:
+                    raise ProviderError(
+                        "malformed embedding response: malformed embedding numeric value"
+                    ) from exc
+                if not math.isfinite(number):
+                    raise ProviderError(
+                        "malformed embedding response: embedding values must be finite"
+                    )
+                vector.append(number)
+            vectors[index] = vector
+
+        if len(seen_indexes) != batch_size:
+            missing = sorted(set(range(batch_size)) - seen_indexes)
+            raise ProviderError(
+                f"malformed embedding response: missing embedding indexes {missing}"
+            )
+
+        ordered = [vector for vector in vectors if vector is not None]
+        if len(ordered) != batch_size:
+            raise ProviderError("malformed embedding response: incomplete embedding set")
+        return ordered
 
     def _config_batch_attempts(self) -> int:
         return 3
