@@ -7,7 +7,7 @@ import pytest
 
 from ledger.config.settings import EmbedderConfig, RagSystemConfig
 from ledger.providers.mock import MockLLMProvider
-from ledger.providers.openai_compat import OpenAICompatEmbedder
+from ledger.providers.openai_compat import OpenAICompatEmbedder, _headers
 from ledger.systems.rag.chunking import Chunk, Document, chunk_document, load_corpus
 from ledger.systems.rag.embeddings import HashingTfIdfEmbedder
 from ledger.systems.rag.prompts import available_prompt_versions, get_prompt_template
@@ -227,6 +227,15 @@ def test_remote_embedder_multiple_batches_preserve_order(
     expected = lengths / np.sqrt(lengths**2 + 1.0)
     assert np.allclose(matrix[:, 0], expected)
 
+
+def test_api_headers_use_bearer_token_and_preserve_custom_headers() -> None:
+    headers = _headers("abc123xyz", {"X-Custom-Header": "custom-value"})
+
+    expected_authorization = "".join(["Bearer", " ", "abc123xyz"])
+    assert headers["Authorization"] == expected_authorization
+
+    assert headers["Content-Type"] == "application/json"
+    assert headers["X-Custom-Header"] == "custom-value"
 
 # ---------------------------------------------------------------------------
 # retrieval index
