@@ -45,6 +45,19 @@ def _backoff_seconds(attempt: int, retry_after: float | None) -> float:
     return min(_BACKOFF_BASE_S * (2**attempt), _MAX_BACKOFF_S)
 
 
+def _retry_after_hint(exc_or_response: object) -> float | None:
+    response = (
+        exc_or_response
+        if hasattr(exc_or_response, "headers")
+        else getattr(exc_or_response, "response", None)
+    )
+    header = getattr(response, "headers", {}).get("Retry-After") if response else None
+    try:
+        return float(header) if header else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _headers(api_key: str | None, extra: dict[str, str]) -> dict[str, str]:
     headers = {"Content-Type": "application/json", **extra}
     if api_key:
@@ -91,6 +104,7 @@ class OpenAICompatProvider(LLMProvider):
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
                 detail = exc.response.text[:400]
+                retry_after = self._retry_after_hint(exc.response)
                 # Some servers don't support response_format: retry once without it.
                 if status == 400 and allow_json_mode and "response_format" in detail:
                     logger.warning("server rejected response_format=json_object; retrying without")
@@ -102,12 +116,11 @@ class OpenAICompatProvider(LLMProvider):
                     raise last_error from exc
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 last_error = ProviderError(f"transport error: {exc}")
+                retry_after = None
 
             if attempts > self._config.max_retries:
                 break
-            wait = _backoff_seconds(
-                attempts - 1, self._retry_after_hint(getattr(last_error, "response", None))
-            )
+            wait = _backoff_seconds(attempts - 1, retry_after)
             logger.warning(
                 "provider attempt %d/%d failed (%s); retrying in %.1fs",
                 attempts,
@@ -124,12 +137,7 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _retry_after_hint(exc_or_response: object) -> float | None:
-        response = getattr(exc_or_response, "response", None)
-        header = getattr(response, "headers", {}).get("Retry-After") if response else None
-        try:
-            return float(header) if header else None
-        except (TypeError, ValueError):
-            return None
+        return _retry_after_hint(exc_or_response)
 
     def _payload(self, request: CompletionRequest) -> dict[str, object]:
         config = self._config
@@ -236,10 +244,13 @@ class OpenAICompatEmbedder:
                 last_error = ProviderError(f"embedding request failed: {exc}")
                 if isinstance(exc, httpx.HTTPStatusError):
                     status = exc.response.status_code
+                    retry_after = _retry_after_hint(exc.response)
                     if status not in _RETRYABLE_STATUS:
                         raise last_error from exc
+                else:
+                    retry_after = None
                 if attempt < self._config_batch_attempts() - 1:
-                    time.sleep(_backoff_seconds(attempt, None))
+                    time.sleep(_backoff_seconds(attempt, retry_after))
                 continue
             return self._validate_embedding_response(data, len(batch))
         assert last_error is not None
