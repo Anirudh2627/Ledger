@@ -63,6 +63,19 @@ def _decide(base, cand, policy=None):
     return detect_regressions(comparison, base.summary, cand.summary, policy or RegressionPolicy())
 
 
+def _compare_and_decide(base, cand, policy=None):
+    policy = policy or RegressionPolicy()
+    comparison = compare_runs(
+        base,
+        cand,
+        n_samples=policy.bootstrap.n_samples,
+        confidence=policy.bootstrap.confidence,
+        seed=policy.bootstrap.seed,
+    )
+    decision = detect_regressions(comparison, base.summary, cand.summary, policy)
+    return comparison, decision
+
+
 def test_identical_runs_pass() -> None:
     base, cand = _runs([0.0] * 12)
     decision = _decide(base, cand)
@@ -178,6 +191,60 @@ def test_judge_failure_rate_blocks() -> None:
 def test_small_sample_warns() -> None:
     base, cand = _runs([0.0] * 6)
     decision = _decide(base, cand)
+    assert any(v.rule == "small_sample" for v in decision.warnings)
+
+
+def test_one_pair_threshold_drop_warns_without_significance_failure() -> None:
+    base, cand = _runs([-0.1], critical_idx=())
+    comparison, decision = _compare_and_decide(base, cand)
+
+    assert comparison.overall is not None
+    assert comparison.overall.n_paired == 1
+    assert decision.status == "WARNING"
+    assert not any(v.rule == "overall_regression" for v in decision.fails)
+    assert any(v.rule == "small_sample" for v in decision.warnings)
+
+
+def test_below_minimum_paired_sample_warns_without_significance_failure() -> None:
+    policy = RegressionPolicy(min_paired_cases=10)
+    base, cand = _runs([-0.1] * 9, critical_idx=())
+    comparison, decision = _compare_and_decide(base, cand, policy)
+
+    assert comparison.overall is not None
+    assert comparison.overall.n_paired == 9
+    assert decision.status == "WARNING"
+    assert not any(v.rule == "overall_regression" for v in decision.fails)
+    assert any(v.rule == "small_sample" for v in decision.warnings)
+
+
+def test_sufficient_paired_sample_still_fails_supported_regression() -> None:
+    policy = RegressionPolicy(min_paired_cases=10)
+    deltas = [-0.06, -0.07, -0.08, -0.09, -0.10, -0.10, -0.11, -0.12, -0.13, -0.14]
+    base, cand = _runs(deltas, critical_idx=())
+    comparison, decision = _compare_and_decide(base, cand, policy)
+
+    assert comparison.overall is not None
+    assert comparison.overall.n_paired == 10
+    assert comparison.overall.ci_high is not None
+    assert comparison.overall.ci_high < 0
+    assert comparison.overall.p_value is not None
+    assert comparison.overall.p_value < policy.significance_alpha
+    assert decision.status == "FAIL"
+    assert any(v.rule == "overall_regression" for v in decision.fails)
+
+
+def test_small_sample_does_not_suppress_newly_failing_critical_case() -> None:
+    base, cand = _runs(
+        [0.0],
+        base_passed=[True],
+        cand_passed=[False],
+        critical_idx=(0,),
+    )
+    comparison, decision = _compare_and_decide(base, cand)
+
+    assert comparison.n_common == 1
+    assert decision.status == "FAIL"
+    assert any(v.rule == "critical_failures" for v in decision.fails)
     assert any(v.rule == "small_sample" for v in decision.warnings)
 
 
