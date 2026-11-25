@@ -277,7 +277,7 @@ def test_category_regression_fails() -> None:
     ]
     base = RunData(make_summary("b", "A", base_results), base_results)
     cand = RunData(make_summary("c", "B", cand_results), cand_results)
-    decision = _decide(base, cand)
+    decision = _decide(base, cand, RegressionPolicy(min_paired_cases=5))
     rules = {v.rule for v in decision.fails}
     assert "category_regression" in rules
     assert any(v.details.get("category") == "refusal" for v in decision.fails)

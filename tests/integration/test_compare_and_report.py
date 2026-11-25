@@ -54,7 +54,9 @@ def _run_pair(tmp_path):
 
 def test_degraded_candidate_fails_gate(tmp_path) -> None:
     base, cand = _run_pair(tmp_path)
-    outcome = compare_and_gate(_store(tmp_path), base.run_id, cand.run_id, RegressionPolicy())
+    outcome = compare_and_gate(
+        _store(tmp_path), base.run_id, cand.run_id, RegressionPolicy(min_paired_cases=5)
+    )
 
     assert outcome.decision.status == "FAIL"
     rules = {v.rule for v in outcome.decision.fails}
