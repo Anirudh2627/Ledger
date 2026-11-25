@@ -107,7 +107,7 @@ gate that blocks merges when the evidence says so — with reports that explain
                     ┌──────────┴───────────┐
                     ▼                      ▼
           ┌─────────────────┐     ┌─────────────────┐
-          │ Report Generator│     │ CI Gate         │  exit 0/1/2
+          │ Report Generator│     │ CI Gate         │  exit 0/1
           │ md / json / tty │     │ GitHub Actions  │  PASS / WARNING / FAIL
           └─────────────────┘     └─────────────────┘
 ```
@@ -127,7 +127,7 @@ Full component walkthrough, data model and extension guide:
 | **Judge calibration** | Agreement between judge and human labels: MAE, Pearson/Spearman, within-±1 agreement, pass agreement, Cohen's κ. |
 | **Paired comparison** | Same cases on both sides ⇒ per-case deltas ⇒ paired percentile bootstrap CI + p-value per metric/category/critical slice, plus an exact sign test on pass/fail flips. |
 | **Regression policy** | YAML thresholds & rules (never code): overall/categories/critical bands, per-metric thresholds, newly-failing budgets, judge-failure-rate integrity rule, significance requirement. |
-| **Gate decision** | `PASS` / `WARNING` / `FAIL` with machine-readable rule ids and human messages; mapped to CI exit codes 0/2/1. |
+| **Gate decision** | `PASS` / `WARNING` / `FAIL` with machine-readable rule ids and human messages; WARNING exits 0 by default, FAIL exits 1. |
 
 ## Repository structure
 
@@ -222,7 +222,7 @@ ledger evaluate --config configs/baseline.yaml
 ```text
 ledger evaluate          run one system config over the dataset → artifacts
 ledger compare           compare two runs, apply policy, write reports
-ledger gate              compare as a CI gate (exit 0=PASS, 1=FAIL, 2=WARNING)
+ledger gate              compare as a CI gate (exit 0=PASS/WARNING, 1=FAIL)
 ledger report            single-run aggregate report (md/json)
 ledger calibrate         judge vs human labels → agreement report
 ledger validate-dataset  schema + health checks for a golden dataset
@@ -275,7 +275,7 @@ ledger gate --config-baseline configs/baseline.yaml \
 Run references accept ids, unique prefixes, paths, or `latest[:version]`.
 Reports land in `reports/` as Markdown + JSON; the console prints the summary.
 
-**Exit-code contract:** `0` PASS · `1` FAIL · `2` WARNING (becomes 1 with
+**Exit-code contract:** `0` PASS or WARNING · `1` FAIL (or WARNING with
 `--fail-on-warning`) · `3` usage/config error.
 
 ## Judge calibration

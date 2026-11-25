@@ -52,7 +52,7 @@ it to your own LLM application.
                     ▼                      ▼
           ┌─────────────────┐     ┌─────────────────┐
           │ Report Generator│     │ CI Gate         │  src/ledger/cli/main.py
-          │ md / json / tty │     │ exit 0/1/2      │  scripts/ci/gate.sh
+          │ md / json / tty │     │ exit 0/1        │  scripts/ci/gate.sh
           └─────────────────┘     └─────────────────┘
 ```
 

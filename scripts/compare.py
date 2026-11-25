@@ -5,7 +5,8 @@ Usage:
     python scripts/compare.py --baseline <run-id> --candidate <run-id> \
         [--policy configs/policy.yaml]
 
-Exit codes match the CLI gate contract: 0=PASS, 1=FAIL, 2=WARNING.
+Exit codes match the CLI gate contract: 0=PASS/WARNING, 1=FAIL or
+WARNING with --fail-on-warning.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     if status == "FAIL":
         return 1
     if status == "WARNING":
-        return 1 if args.fail_on_warning else 2
+        return 1 if args.fail_on_warning else 0
     return 0
 
 

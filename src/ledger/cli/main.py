@@ -1,9 +1,8 @@
 """Ledger command-line interface.
 
 Exit codes (CI contract):
-    0 - success / gate PASS
+    0 - success / gate PASS or WARNING
     1 - gate FAIL (or operational error)
-    2 - gate WARNING (unless --fail-on-warning)
     3 - invalid usage / configuration / dataset errors
 """
 
@@ -52,7 +51,6 @@ logger = get_logger(__name__)
 
 EXIT_OK = 0
 EXIT_FAIL = 1
-EXIT_WARNING = 2
 EXIT_USAGE = 3
 
 
@@ -307,7 +305,7 @@ def gate(
         bool, typer.Option("--mock", help="Force mock providers in one-shot mode.")
     ] = False,
 ) -> None:
-    """CI quality gate. Exit: 0=PASS, 1=FAIL, 2=WARNING (see docs/ci-cd.md)."""
+    """CI quality gate. Exit: 0=PASS/WARNING, 1=FAIL (see docs/ci-cd.md)."""
     forced = config_baseline or config_candidate
     if forced:
         if not (config_baseline and config_candidate):
@@ -338,7 +336,7 @@ def gate(
     if status == "WARNING" and fail_on_warning:
         raise typer.Exit(EXIT_FAIL)
     if status == "WARNING":
-        raise typer.Exit(EXIT_WARNING)
+        raise typer.Exit(EXIT_OK)
     raise typer.Exit(EXIT_OK)
 
 

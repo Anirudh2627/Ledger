@@ -88,6 +88,15 @@ def _small_policy(tmp_path):
     return str(path)
 
 
+def _warning_policy(tmp_path):
+    """Keep the mini dataset below the paired-case minimum to trigger WARNING."""
+    import yaml
+
+    path = tmp_path / "warning-policy.yaml"
+    path.write_text(yaml.safe_dump({"min_paired_cases": 10}), encoding="utf-8")
+    return str(path)
+
+
 def test_cli_gate_one_shot_fail_exit_1(tmp_path) -> None:
     good, bad = _gate_configs(tmp_path)
     result = runner.invoke(
@@ -115,6 +124,45 @@ def test_cli_gate_one_shot_pass_exit_0(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "PASS" in result.output
+
+
+def test_cli_gate_warning_is_non_blocking_by_default(tmp_path) -> None:
+    good, _ = _gate_configs(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "gate",
+            "--config-baseline",
+            str(good),
+            "--config-candidate",
+            str(good),
+            "--mock",
+            "--policy",
+            _warning_policy(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "WARNING" in result.output
+
+
+def test_cli_gate_warning_fails_when_requested(tmp_path) -> None:
+    good, _ = _gate_configs(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "gate",
+            "--config-baseline",
+            str(good),
+            "--config-candidate",
+            str(good),
+            "--mock",
+            "--policy",
+            _warning_policy(tmp_path),
+            "--fail-on-warning",
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "WARNING" in result.output
 
 
 def test_cli_gate_by_run_refs_and_latest(make_config_file, tmp_path) -> None:

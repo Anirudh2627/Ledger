@@ -12,7 +12,8 @@ name: LLM Evaluation Gate
 #                        when OPENAI-compatible secrets are configured.
 #
 # Exit-code contract of `scripts/ci/gate.sh` (wraps `ledger gate`):
-#   0 = PASS, 1 = FAIL, 2 = WARNING (non-blocking unless --fail-on-warning)
+#   0 = PASS or WARNING, 1 = FAIL or WARNING with --fail-on-warning
+#   3 = usage/config/dataset error
 # -----------------------------------------------------------------------------
 on:
   pull_request:

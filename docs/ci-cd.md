@@ -21,9 +21,8 @@ process exit codes:
 
 | Exit code | Meaning | CI effect |
 |---|---|---|
-| `0` | PASS | green |
-| `1` | FAIL | **blocks the merge** |
-| `2` | WARNING | green by default; with `--fail-on-warning` becomes `1` |
+| `0` | PASS or WARNING | green; warnings remain visible in the report |
+| `1` | FAIL, or WARNING with `--fail-on-warning` | **blocks the merge** |
 | `3` | usage/config/dataset error | blocks (infrastructure problem) |
 
 FAIL is produced only by policy rules (see
@@ -43,7 +42,7 @@ llm-evaluation.yml runs
   ├─ lint + unit tests            (fast feedback)
   ├─ ledger evaluate baseline     (cached in mock mode*)
   ├─ ledger evaluate candidate
-  ├─ scripts/ci/gate.sh           → exit 0/1/2
+  ├─ scripts/ci/gate.sh           → exit 0/1 (default)
   ├─ report → $GITHUB_STEP_SUMMARY
   └─ artifacts → reports/ + results/*/ (30-day retention)
         │
@@ -147,4 +146,5 @@ make demo-fail        # same, with the intentionally degraded candidate → exit
 ```
 
 `scripts/ci/gate.sh` is the exact command CI runs, so local results match
-the pipeline (same exit-code contract).
+the pipeline (same exit-code contract). WARNING is non-blocking by default;
+pass `--fail-on-warning` to make it blocking.
