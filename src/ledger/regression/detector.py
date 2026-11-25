@@ -103,6 +103,8 @@ def _exceeds(
 
 def _significant(comparison: MetricComparison, policy: RegressionPolicy) -> bool:
     """Statistical support for a directional change."""
+    if comparison.n_paired < policy.min_paired_cases:
+        return False
     ci_conclusive = (
         comparison.ci_high is not None
         and comparison.ci_low is not None
