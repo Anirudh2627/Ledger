@@ -17,11 +17,20 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from math import isclose
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ledger.core.models import EvaluationResult, RunSummary
+from ledger.config.settings import LedgerConfig
+from ledger.core.models import EvaluationResult, RunSummary, validate_result_integrity
+from ledger.judges.base import finalize_score
+from ledger.metrics.aggregate import (
+    category_aggregates,
+    count_stats,
+    latency_stats,
+    metric_means,
+)
 from ledger.regression.bootstrap import (
     BootstrapResult,
     InsufficientDataError,
@@ -117,9 +126,118 @@ class RunData:
 
     summary: RunSummary
     results: list[EvaluationResult]
+    decision_config: LedgerConfig | None = None
+
+    def __post_init__(self) -> None:
+        self.validate_integrity()
+
+    def validate_integrity(self) -> None:
+        validate_result_integrity(self.results)
+        if self.decision_config is not None:
+            self._validate_decisions()
+        if self.summary.dataset.n_cases != len(self.results):
+            raise ValueError(
+                f"run summary declares {self.summary.dataset.n_cases} cases but results "
+                f"contain {len(self.results)}"
+            )
+        if any(
+            result.run_id != self.summary.run_id
+            or result.system_version != self.summary.system_version
+            for result in self.results
+        ):
+            raise ValueError("result run identity does not match run summary")
+        if self.summary.counts != count_stats(self.results):
+            raise ValueError("run summary counts do not match result rows")
+        expected_metrics = {
+            name: round(value, 6) for name, value in metric_means(self.results).items()
+        }
+        if self.summary.metrics != expected_metrics:
+            raise ValueError("run summary metrics do not match result rows")
+        if self.summary.categories != category_aggregates(self.results):
+            raise ValueError("run summary categories do not match result rows")
+        if self.summary.latency != latency_stats(self.results):
+            raise ValueError("run summary latency does not match result rows")
+
+    def _validate_decisions(self) -> None:
+        config = self.decision_config
+        if config is None:
+            return
+        if self.summary.judge_enabled != config.judge.enabled:
+            raise ValueError("run summary judge state does not match saved configuration")
+
+        for result in self.results:
+            if result.error is not None:
+                if (
+                    result.judge_failed
+                    or result.judge_scores is not None
+                    or result.judge_overall is not None
+                ):
+                    raise ValueError(
+                        f"result decision has judge data for errored case {result.test_id}"
+                    )
+                expected_score, expected_passed = 0.0, False
+            elif config.judge.enabled and not result.judge_failed:
+                if result.judge_scores is None:
+                    raise ValueError(
+                        f"result decision is missing judge dimensions for {result.test_id}"
+                    )
+                if set(result.judge_scores) != set(config.judge.dimensions):
+                    raise ValueError(
+                        f"result decision has inconsistent judge dimensions for {result.test_id}"
+                    )
+                expected_judge = finalize_score(
+                    result.judge_scores,
+                    critical=result.critical,
+                    config=config.judge,
+                )
+                if not _scores_match(result.judge_overall, expected_judge.overall):
+                    raise ValueError(
+                        f"result decision judge overall is inconsistent for {result.test_id}"
+                    )
+                expected_score, expected_passed = (
+                    expected_judge.normalized,
+                    expected_judge.passed,
+                )
+            else:
+                if result.judge_scores is not None or result.judge_overall is not None:
+                    raise ValueError(
+                        f"result decision has judge scores in an invalid state for {result.test_id}"
+                    )
+                if result.judge_failed and (
+                    not config.judge.enabled or config.judge.on_failure == "abort"
+                ):
+                    raise ValueError(
+                        f"result decision has an invalid judge failure for {result.test_id}"
+                    )
+                deterministic = [
+                    value for value in result.deterministic_scores.values() if value is not None
+                ]
+                fallback_score = sum(deterministic) / len(deterministic) if deterministic else None
+                if result.judge_failed and config.judge.on_failure == "fail_case":
+                    expected_score, expected_passed = fallback_score, False
+                elif fallback_score is None:
+                    expected_score, expected_passed = None, None
+                else:
+                    expected_score = round(fallback_score, 6)
+                    expected_passed = fallback_score >= config.evaluation.fallback_pass_threshold
+
+            if not _scores_match(result.overall_score, expected_score):
+                raise ValueError(
+                    f"result decision overall score is inconsistent for {result.test_id}"
+                )
+            if result.passed is not expected_passed:
+                raise ValueError(
+                    f"result decision pass status is inconsistent for {result.test_id}"
+                )
 
     def by_id(self) -> dict[str, EvaluationResult]:
         return {r.test_id: r for r in self.results}
+
+
+def _scores_match(actual: float | None, expected: float | None) -> bool:
+    if actual is None or expected is None:
+        return actual is expected
+    return isclose(actual, expected, rel_tol=0.0, abs_tol=1e-6)
 
 
 def _per_case_values(results: Sequence[EvaluationResult], metric: str) -> dict[str, float]:
@@ -208,6 +326,8 @@ def compare_runs(
     extra_metrics: Sequence[str] = (),
 ) -> ComparisonResult:
     """Build a full paired comparison between two runs."""
+    baseline.validate_integrity()
+    candidate.validate_integrity()
     base_by_id = baseline.by_id()
     cand_by_id = candidate.by_id()
     common_ids = sorted(set(base_by_id) & set(cand_by_id))

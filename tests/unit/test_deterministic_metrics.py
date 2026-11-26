@@ -200,3 +200,15 @@ def test_compute_all_clamps_out_of_range() -> None:
 
     scores = compute_all([Wild()], ctx(make_case()))
     assert scores["wild"] == 1.0
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), True, "0.5"])
+def test_compute_all_rejects_invalid_metric_output(value: object) -> None:
+    class Invalid(DeterministicMetric):
+        name = "invalid"
+
+        def compute(self, ctx: MetricContext) -> float | None:
+            return value  # type: ignore[return-value]
+
+    with pytest.raises(ValueError, match="invalid metric score"):
+        compute_all([Invalid()], ctx(make_case()))

@@ -260,6 +260,7 @@ def test_category_regression_fails() -> None:
             critical=False,
             judge_dims=DIMS,
             run_id="b",
+            system_version="A",
         )
         for i in range(12)
     ]
@@ -272,6 +273,7 @@ def test_category_regression_fails() -> None:
             critical=False,
             judge_dims=DIMS,
             run_id="c",
+            system_version="B",
         )
         for i in range(12)
     ]

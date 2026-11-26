@@ -7,12 +7,55 @@ validatable, serializable and self-documenting.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ledger.dataset.schema import TestCase
+
+
+def _validate_latency(value: Any, field_name: str) -> Any:
+    if value is None:
+        return value
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ValueError(f"{field_name} must be a finite non-negative number")
+    return value
+
+
+def _validate_normalized_metrics(metrics: Any, field_name: str) -> Any:
+    if not isinstance(metrics, dict):
+        return metrics
+    for name, value in metrics.items():
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not 0.0 <= value <= 1.0
+        ):
+            raise ValueError(f"{field_name} '{name}' must be finite and in [0, 1]")
+    return metrics
+
+
+def _validate_normalized_score(value: Any, field_name: str) -> Any:
+    if value is None:
+        return value
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or not 0.0 <= value <= 1.0
+    ):
+        raise ValueError(f"{field_name} must be finite and in [0, 1]")
+    return value
+
 
 # ---------------------------------------------------------------------------
 # Provider I/O
@@ -61,6 +104,11 @@ class CompletionResponse(BaseModel):
     #: Number of transport-level attempts that were needed.
     attempts: int = 1
 
+    @field_validator("latency_ms", mode="before")
+    @classmethod
+    def _validate_latency_ms(cls, value: Any) -> Any:
+        return _validate_latency(value, "latency_ms")
+
 
 # ---------------------------------------------------------------------------
 # System-under-test output
@@ -91,6 +139,11 @@ class SystemOutput(BaseModel):
     error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("latency_ms", mode="before")
+    @classmethod
+    def _validate_latency_ms(cls, value: Any) -> Any:
+        return _validate_latency(value, "latency_ms")
+
 
 # ---------------------------------------------------------------------------
 # Judge output
@@ -117,6 +170,45 @@ class JudgeScore(BaseModel):
     error: str | None = None
     #: Raw judge text, truncated; useful for debugging calibration issues.
     raw: str | None = None
+
+    @field_validator("dimensions", mode="before")
+    @classmethod
+    def _validate_dimensions(cls, dimensions: Any) -> Any:
+        if not isinstance(dimensions, dict):
+            return dimensions
+        for name, value in dimensions.items():
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 5:
+                raise ValueError(f"judge dimension '{name}' must be an integer in [1, 5]")
+        return dimensions
+
+    @field_validator("overall", mode="before")
+    @classmethod
+    def _validate_overall(cls, value: Any) -> Any:
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not 1.0 <= value <= 5.0
+        ):
+            raise ValueError("judge overall must be finite and in [1, 5]")
+        return value
+
+    @field_validator("normalized", mode="before")
+    @classmethod
+    def _validate_normalized(cls, value: Any) -> Any:
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not 0.0 <= value <= 1.0
+        ):
+            raise ValueError("normalized judge score must be finite and in [0, 1]")
+        return value
+
+    @field_validator("latency_ms", mode="before")
+    @classmethod
+    def _validate_latency_ms(cls, value: Any) -> Any:
+        return _validate_latency(value, "latency_ms")
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +255,59 @@ class EvaluationResult(BaseModel):
 
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("latency_ms", mode="before")
+    @classmethod
+    def _validate_latency_ms(cls, value: Any) -> Any:
+        return _validate_latency(value, "latency_ms")
+
+    @field_validator("deterministic_scores", mode="before")
+    @classmethod
+    def _validate_deterministic_scores(cls, scores: Any) -> Any:
+        if not isinstance(scores, dict):
+            return scores
+        for name, value in scores.items():
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"deterministic score '{name}' must be numeric")
+            if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ValueError(f"deterministic score '{name}' must be finite and in [0, 1]")
+        return scores
+
+    @field_validator("judge_scores", mode="before")
+    @classmethod
+    def _validate_judge_score_values(cls, scores: Any) -> Any:
+        if scores is None:
+            return scores
+        if not isinstance(scores, dict):
+            return scores
+        for name, value in scores.items():
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 5:
+                raise ValueError(f"judge score '{name}' must be an integer in [1, 5]")
+        return scores
+
+    @field_validator("judge_overall", mode="before")
+    @classmethod
+    def _validate_judge_overall(cls, value: Any) -> Any:
+        if value is None:
+            return value
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("judge_overall must be numeric")
+        if not math.isfinite(value) or not 1.0 <= value <= 5.0:
+            raise ValueError("judge_overall must be finite and in [1, 5]")
+        return value
+
+    @field_validator("overall_score", mode="before")
+    @classmethod
+    def _validate_overall_score(cls, value: Any) -> Any:
+        if value is None:
+            return value
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("overall_score must be numeric")
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError("overall_score must be finite and in [0, 1]")
+        return value
+
     @classmethod
     def create(
         cls,
@@ -205,6 +350,17 @@ class EvaluationResult(BaseModel):
         )
 
 
+def validate_result_integrity(results: Sequence[EvaluationResult]) -> None:
+    """Revalidate result values and reject duplicate identities."""
+    for result in results:
+        EvaluationResult.model_validate(result.model_dump())
+    seen: set[str] = set()
+    for result in results:
+        if result.test_id in seen:
+            raise ValueError(f"duplicate result test id '{result.test_id}'")
+        seen.add(result.test_id)
+
+
 # ---------------------------------------------------------------------------
 # Run summary / aggregates
 # ---------------------------------------------------------------------------
@@ -213,7 +369,7 @@ class EvaluationResult(BaseModel):
 class DatasetInfo(BaseModel):
     path: str
     fingerprint: str
-    n_cases: int
+    n_cases: int = Field(ge=0, strict=True)
 
 
 class ProviderInfo(BaseModel):
@@ -224,12 +380,12 @@ class ProviderInfo(BaseModel):
 
 
 class CountStats(BaseModel):
-    total: int = 0
-    passed: int = 0
-    failed: int = 0
-    errored: int = 0
-    judge_failed: int = 0
-    not_passed: int = 0  # failed + errored (what the gate counts)
+    total: int = Field(default=0, ge=0, strict=True)
+    passed: int = Field(default=0, ge=0, strict=True)
+    failed: int = Field(default=0, ge=0, strict=True)
+    errored: int = Field(default=0, ge=0, strict=True)
+    judge_failed: int = Field(default=0, ge=0, strict=True)
+    not_passed: int = Field(default=0, ge=0, strict=True)  # failed + errored (what the gate counts)
 
 
 class LatencyStats(BaseModel):
@@ -237,12 +393,27 @@ class LatencyStats(BaseModel):
     p50_ms: float | None = None
     p95_ms: float | None = None
 
+    @field_validator("mean_ms", "p50_ms", "p95_ms", mode="before")
+    @classmethod
+    def _validate_latency_stat(cls, value: Any) -> Any:
+        return _validate_latency(value, "latency statistic")
+
 
 class CategoryAggregate(BaseModel):
-    n: int
+    n: int = Field(ge=0, strict=True)
     overall_mean: float | None = None
     pass_rate: float | None = None
     metrics: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("overall_mean", "pass_rate", mode="before")
+    @classmethod
+    def _validate_normalized_value(cls, value: Any) -> Any:
+        return _validate_normalized_score(value, "aggregate score")
+
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def _validate_metrics(cls, metrics: Any) -> Any:
+        return _validate_normalized_metrics(metrics, "aggregate metric")
 
 
 class RunSummary(BaseModel):
@@ -264,3 +435,29 @@ class RunSummary(BaseModel):
     latency: LatencyStats = Field(default_factory=LatencyStats)
     runtime: dict[str, Any] = Field(default_factory=dict)
     config_snapshot: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def _validate_metrics(cls, metrics: Any) -> Any:
+        return _validate_normalized_metrics(metrics, "run metric")
+
+    @model_validator(mode="after")
+    def _validate_aggregate_counts(self) -> RunSummary:
+        if self.counts.total != self.dataset.n_cases:
+            raise ValueError("run summary total does not match dataset case count")
+        if self.counts.not_passed != self.counts.failed + self.counts.errored:
+            raise ValueError("run summary not_passed count is inconsistent")
+        if self.counts.passed + self.counts.failed > self.counts.total:
+            raise ValueError("run summary pass/fail counts exceed total")
+        if self.counts.errored > self.counts.total or self.counts.judge_failed > self.counts.total:
+            raise ValueError("run summary error counts exceed total")
+        if sum(category.n for category in self.categories.values()) != self.dataset.n_cases:
+            raise ValueError("run summary category counts do not match dataset case count")
+        decidable = self.counts.passed + self.counts.failed
+        if decidable:
+            expected_pass_rate = round(self.counts.passed / decidable, 6)
+            if self.metrics.get("pass_rate") != expected_pass_rate:
+                raise ValueError("run summary pass_rate does not match pass/fail counts")
+        elif "pass_rate" in self.metrics:
+            raise ValueError("run summary pass_rate exists without a decidable case")
+        return self

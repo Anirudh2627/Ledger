@@ -95,8 +95,14 @@ def test_flips_and_critical_regressions() -> None:
 
 
 def test_improved_cases() -> None:
-    base_results = [make_result(f"t{i}", overall=0.4, passed=False) for i in range(N)]
-    cand_results = [make_result(f"t{i}", overall=0.9, passed=True) for i in range(N)]
+    base_results = [
+        make_result(f"t{i}", overall=0.4, passed=False, run_id="b", system_version="A")
+        for i in range(N)
+    ]
+    cand_results = [
+        make_result(f"t{i}", overall=0.9, passed=True, run_id="c", system_version="B")
+        for i in range(N)
+    ]
     base = RunData(make_summary("b", "A", base_results), base_results)
     cand = RunData(make_summary("c", "B", cand_results), cand_results)
     comp = compare_runs(base, cand, n_samples=500, seed=1)
@@ -108,6 +114,7 @@ def test_improved_cases() -> None:
 def test_missing_cases_on_one_side() -> None:
     base, cand = _runs(delta=0.0)
     cand.results = cand.results[:-2]  # drop t10, t11
+    cand.summary = make_summary("cand", "B", cand.results)
     comp = compare_runs(base, cand, n_samples=500, seed=1)
     assert comp.n_common == N - 2
     statuses = {c.test_id: c.status for c in comp.cases}

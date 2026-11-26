@@ -9,6 +9,7 @@ that don't apply are excluded from aggregation, never counted as zero).
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Iterable
 
@@ -250,6 +251,15 @@ def compute_all(
             logger.warning("metric %s failed on case %s: %s", metric.name, ctx.case.id, exc)
             value = None
         if value is not None:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise ValueError(
+                    f"metric '{metric.name}' returned invalid metric score {value!r}; "
+                    "expected a finite number"
+                )
             value = max(0.0, min(1.0, float(value)))
         scores[metric.name] = value
     return scores

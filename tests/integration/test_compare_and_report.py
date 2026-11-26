@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 
 import pytest
+from typer.testing import CliRunner
 
+from ledger.cli.main import app
 from ledger.config.settings import load_config
 from ledger.evaluation.compare import compare_and_gate, load_run_data
 from ledger.evaluation.pipeline import run_evaluation
@@ -105,6 +107,57 @@ def test_load_run_data_round_trip(tmp_path) -> None:
     assert data.summary.run_id == base.run_id
     assert len(data.results) == 6
     assert {r.test_id for r in data.results} == {r.test_id for r in base.results}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("metrics", {"overall": 0.123}),
+        ("latency", {"mean_ms": 1234.5, "p50_ms": 1234.5, "p95_ms": 1234.5}),
+    ],
+)
+def test_single_run_report_rejects_finite_tampered_aggregates(tmp_path, field, value) -> None:
+    config_path = write_config_file(
+        tmp_path,
+        {"system": {"kind": "mock", "mode": "reference"}},
+        name="report.yaml",
+    )
+    config = load_config(config_path)
+    store = _store(tmp_path)
+    run = run_evaluation(config, store=store, progress=False)
+
+    summary_path = run.run_dir / "summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload[field].update(value)
+    summary_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        ["report", "--run", run.run_id, "--config", str(config_path), "--format", "json"],
+    )
+
+    assert result.exit_code == 3, result.output
+    assert "run summary" in result.output
+    assert not (store.reports_dir / f"run_{run.run_id}.json").exists()
+
+
+def test_single_run_report_accepts_valid_summary(tmp_path) -> None:
+    config_path = write_config_file(
+        tmp_path,
+        {"system": {"kind": "mock", "mode": "reference"}},
+        name="report.yaml",
+    )
+    config = load_config(config_path)
+    store = _store(tmp_path)
+    run = run_evaluation(config, store=store, progress=False)
+
+    result = CliRunner().invoke(
+        app,
+        ["report", "--run", run.run_id, "--config", str(config_path), "--format", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (store.reports_dir / f"run_{run.run_id}.json").is_file()
 
 
 def test_shipped_configs_produce_comparable_runs(repo_root, tmp_path, monkeypatch) -> None:

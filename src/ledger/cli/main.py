@@ -22,7 +22,7 @@ from ledger.config.settings import ConfigError, LedgerConfig, load_config
 from ledger.core.models import RunSummary
 from ledger.dataset.loader import DatasetError, load_dataset
 from ledger.dataset.validator import validate_cases
-from ledger.evaluation.compare import GateOutcome, compare_and_gate
+from ledger.evaluation.compare import GateOutcome, compare_and_gate, load_run_data
 from ledger.evaluation.pipeline import PipelineError, run_evaluation
 from ledger.judges.calibration import (
     calibrate_judge,
@@ -369,7 +369,7 @@ def report(
     ref = "latest" if latest else run
     try:
         run_dir = store.resolve_run(_resolve_ref(store, ref, fallback_latest=True))
-        summary: RunSummary = store.load_summary(run_dir)
+        summary: RunSummary = load_run_data(store, run_dir, verify_decisions=False).summary
     except (FileNotFoundError, ValueError) as exc:
         _die(str(exc))
         return

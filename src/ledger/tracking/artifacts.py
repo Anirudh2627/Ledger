@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ledger.core.models import EvaluationResult, RunSummary
+from ledger.core.models import EvaluationResult, RunSummary, validate_result_integrity
 from ledger.utils.env import redact_secrets
 from ledger.utils.logging import get_logger
 
@@ -79,6 +79,7 @@ class ArtifactStore:
     # -- writing -----------------------------------------------------------
 
     def save_results(self, run_id: str, results: list[EvaluationResult]) -> Path:
+        validate_result_integrity(results)
         directory = self.ensure_run_dir(run_id)
         path = directory / "results.jsonl"
         with path.open("w", encoding="utf-8") as fh:
@@ -125,6 +126,7 @@ class ArtifactStore:
                     results.append(EvaluationResult.model_validate_json(line))
                 except ValueError as exc:
                     raise ValueError(f"{path}:{line_no}: corrupt result row: {exc}") from exc
+        validate_result_integrity(results)
         return results
 
     def load_summary(self, run_ref: str | Path) -> RunSummary:
@@ -133,6 +135,19 @@ class ArtifactStore:
         if not path.is_file():
             raise FileNotFoundError(f"no summary.json in run directory {directory}")
         return RunSummary.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def load_config_snapshot(self, run_ref: str | Path) -> dict[str, Any] | None:
+        directory = self.resolve_run(run_ref)
+        path = directory / "config.snapshot.json"
+        if not path.is_file():
+            return None
+        try:
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise ValueError(f"invalid config snapshot in {path}: {exc}") from exc
+        if not isinstance(snapshot, dict):
+            raise ValueError(f"config snapshot in {path} must be a JSON object")
+        return snapshot
 
     def resolve_run(self, run_ref: str | Path) -> Path:
         """Resolve a run reference: a path, a run id, or a unique id prefix."""

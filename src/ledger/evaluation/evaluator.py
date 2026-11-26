@@ -6,6 +6,7 @@ from ledger.config.settings import EvaluationConfig, JudgeConfig
 from ledger.core.interfaces import DeterministicMetric, Judge, MetricContext
 from ledger.core.models import EvaluationResult, JudgeScore, SystemOutput
 from ledger.dataset.schema import TestCase
+from ledger.judges.base import finalize_score
 from ledger.metrics.deterministic import compute_all
 from ledger.utils.logging import get_logger
 
@@ -48,6 +49,8 @@ class Evaluator:
         judge_score: JudgeScore | None = None
         if self.judge is not None and output.error is None:
             judge_score = self.judge.score(case, output)
+            if not judge_score.failed:
+                judge_score = self._recompute_judge_score(case, judge_score)
             if judge_score.failed:
                 judge_score = self._handle_judge_failure(case, judge_score)
 
@@ -74,6 +77,45 @@ class Evaluator:
             raise JudgeAbortError(f"judge failed on case {case.id}: {score.error}")
         # "exclude" and "fail_case" both keep the failure on record.
         return score
+
+    def _recompute_judge_score(self, case: TestCase, score: JudgeScore) -> JudgeScore:
+        """Trust judge dimensions only; recompute overall and pass from policy."""
+        config = self.judge_config
+        if config is None:
+            if not score.dimensions:
+                return JudgeScore(
+                    failed=True,
+                    error="judge returned no dimensions",
+                    judge_model=score.judge_model,
+                    latency_ms=score.latency_ms,
+                    attempts=score.attempts,
+                    raw=score.raw,
+                )
+            config = JudgeConfig(dimensions=list(score.dimensions))
+        expected = set(config.dimensions)
+        actual = set(score.dimensions)
+        if not expected or actual != expected:
+            return JudgeScore(
+                failed=True,
+                error=(
+                    f"incomplete judge dimensions: expected {sorted(expected)}, "
+                    f"received {sorted(actual)}"
+                ),
+                judge_model=score.judge_model,
+                latency_ms=score.latency_ms,
+                attempts=score.attempts,
+                raw=score.raw,
+            )
+        return finalize_score(
+            score.dimensions,
+            critical=case.critical,
+            config=config,
+            reason=score.reason,
+            judge_model=score.judge_model,
+            latency_ms=score.latency_ms,
+            attempts=score.attempts,
+            raw=score.raw,
+        )
 
     def _derive_scores(
         self,
