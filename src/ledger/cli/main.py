@@ -33,7 +33,7 @@ from ledger.judges.rubric import RubricJudge
 from ledger.providers.registry import build_provider
 from ledger.regression.policy import PolicyError, RegressionPolicy, load_policy
 from ledger.reporting.console import render_console
-from ledger.reporting.json_report import write_reports
+from ledger.reporting.json_report import safe_report_basename, write_reports
 from ledger.reporting.markdown import render_run_markdown
 from ledger.reporting.report import build_report
 from ledger.tracking.artifacts import ArtifactStore
@@ -376,7 +376,7 @@ def report(
 
     out_dir = Path(out) if out else Path(store.reports_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"run_{summary.run_id}"
+    stem = f"run_{safe_report_basename(summary.run_id)}"
     written: list[Path] = []
     if fmt in {"md", "both"}:
         md_path = out_dir / f"{stem}.md"

@@ -203,19 +203,25 @@ two runs ──▶ align by test_id ──▶ paired per-case values per metric
 * **Pairing**: baseline and candidate run on the same dataset, so every
   metric comparison is *paired* per test case. Pairing removes between-case
   variance and dramatically increases power at n≈40.
-* **Paired percentile bootstrap** (`regression/bootstrap.py`): resample case
-  indices with replacement (2000×, seeded), recompute the mean difference,
-  take percentile CI and a two-sided bootstrap p-value (floored at
-  1/n_samples). No normality assumptions; correct for skewed per-case
-  scores.
+* **Paired percentile bootstrap CI** (`regression/bootstrap.py`): resample
+  case indices with replacement (2000×, seeded), recompute the mean
+  difference, and take percentile bounds. The interval estimates uncertainty;
+  it does not supply the gate's hypothesis-test p-value.
+* **Paired sign-flip permutation test**: compute the two-sided p-value from
+  the null distribution formed by flipping paired-difference signs. Ledger
+  enumerates all patterns through 16 pairs and uses seeded Monte Carlo beyond
+  that. Exact validity assumes paired exchangeability/symmetry under the null.
 * **Sign test**: exact binomial test on pass/fail flips - assumption-free
   corroboration of the count rules.
 * **Detector rules** (`regression/detector.py`): R1 overall, R2 categories,
   R3 critical slice + newly-failing criticals, R4 per-metric thresholds, R5
   count budgets, R6 judge-failure integrity, plus structural warnings
   (dataset mismatch, `min_paired_cases`). With `require_significance: true`,
-  beyond-threshold degradations that lack statistical support downgrade to
-  WARNING instead of blocking merges.
+  beyond-threshold degradations only FAIL
+  when the paired sign-flip p-value is below alpha and the minimum paired
+  sample requirement is met; otherwise they downgrade to WARNING. CI
+  exclusion is reported separately and does not independently trigger a gate
+  FAIL.
 * Every violation carries a machine-readable `rule` id and a human message
   rendered into reports and the CI step summary.
 

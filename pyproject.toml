@@ -51,8 +51,8 @@ dev = [
 ledger = "ledger.cli.main:main"
 
 [project.urls]
-Documentation = "https://github.com/your-org/ledger/tree/main/docs"
-Source = "https://github.com/your-org/ledger"
+Documentation = "https://github.com/Anirudh2627/Ledger/tree/main/docs"
+Source = "https://github.com/Anirudh2627/Ledger"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -101,6 +101,7 @@ indent-style = "space"
 [tool.mypy]
 python_version = "3.11"
 mypy_path = "src"
+explicit_package_bases = true
 files = ["src", "scripts", "tests"]
 disallow_untyped_defs = true
 check_untyped_defs = true

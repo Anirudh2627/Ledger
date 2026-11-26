@@ -53,7 +53,7 @@ def render_console(report: Report, console: Console | None = None) -> None:
             display = "critical (all)" if name == "__critical__" else name
             delta_style = "red" if comp.delta < -1e-9 else ("green" if comp.delta > 1e-9 else "")
             table.add_row(
-                display,
+                Text(display),
                 _fmt(comp.baseline_mean),
                 _fmt(comp.candidate_mean),
                 Text(_fmt(comp.delta), style=delta_style),
@@ -88,8 +88,8 @@ def render_console(report: Report, console: Console | None = None) -> None:
                     violation.severity.upper(),
                     style="red" if violation.severity == "fail" else "yellow",
                 ),
-                violation.rule,
-                violation.message,
+                Text(violation.rule),
+                Text(violation.message),
             )
         console.print(violation_table)
 

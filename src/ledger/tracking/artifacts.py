@@ -17,7 +17,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from ledger.core.models import EvaluationResult, RunSummary, validate_result_integrity
@@ -69,6 +69,15 @@ class ArtifactStore:
         return f"{stamp}-{_slug(system_version)}-{nonce}"
 
     def run_dir(self, run_id: str) -> Path:
+        if (
+            not run_id
+            or run_id in {".", ".."}
+            or run_id.endswith((" ", "."))
+            or "/" in run_id
+            or "\\" in run_id
+            or PureWindowsPath(run_id).drive
+        ):
+            raise ValueError(f"run id must be a single path component: {run_id!r}")
         return self.results_dir / run_id
 
     def ensure_run_dir(self, run_id: str) -> Path:

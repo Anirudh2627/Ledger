@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import httpx
 import numpy as np
 import pytest
@@ -18,12 +20,12 @@ pytestmark = pytest.mark.unit
 
 
 class _SequencedClient:
-    responses: list[httpx.Response] = []
+    responses: ClassVar[list[httpx.Response]] = []
 
     def __init__(self, *, timeout: float) -> None:
         self.timeout = timeout
 
-    def __enter__(self) -> "_SequencedClient":
+    def __enter__(self) -> _SequencedClient:
         return self
 
     def __exit__(self, *args: object) -> None:

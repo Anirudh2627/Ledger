@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from ledger.regression.comparator import MetricComparison, RunData, compare_runs
 from ledger.regression.detector import _significant, detect_regressions
-from ledger.regression.policy import MetricThreshold, RegressionPolicy, ThresholdGroup
+from ledger.regression.policy import CountPolicy, MetricThreshold, RegressionPolicy, ThresholdGroup
 from tests.helpers import make_result, make_summary
 
 pytestmark = pytest.mark.unit
@@ -225,7 +225,7 @@ def test_one_sut_error_counts_once_against_failed_case_budget() -> None:
     candidate = RunData(make_summary("c", "B", candidate_results), candidate_results)
     policy = RegressionPolicy(
         min_paired_cases=10,
-        counts={"max_failed_tests": 1},
+        counts=CountPolicy(max_failed_tests=1),
     )
 
     decision = _decide(base, candidate, policy)

@@ -71,14 +71,14 @@ def _paired_permutation_p_value(differences: np.ndarray, *, n_samples: int, seed
     if n <= 16:
         masks = np.arange(1 << n, dtype=np.uint32)[:, None]
         bits = np.arange(n, dtype=np.uint32)
-        signs = 1.0 - 2.0 * ((masks >> bits) & 1)
-        permuted_means = signs @ differences / n
+        exact_signs = 1.0 - 2.0 * ((masks >> bits) & 1)
+        permuted_means = exact_signs @ differences / n
         extreme = np.count_nonzero(np.abs(permuted_means) >= observed - EPS)
         return float(extreme / len(permuted_means))
 
     rng = np.random.default_rng(seed)
-    signs = rng.integers(0, 2, size=(n_samples, n), dtype=np.int8) * 2 - 1
-    permuted_means = (signs * differences).mean(axis=1)
+    sampled_signs = rng.integers(0, 2, size=(n_samples, n), dtype=np.int8) * 2 - 1
+    permuted_means = (sampled_signs * differences).mean(axis=1)
     extreme = np.count_nonzero(np.abs(permuted_means) >= observed - EPS)
     return float((extreme + 1) / (n_samples + 1))
 

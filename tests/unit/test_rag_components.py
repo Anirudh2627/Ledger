@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -153,12 +154,12 @@ class _EmbeddingResponse:
 
 
 class _EmbeddingClient:
-    response: dict[str, object] | Exception | None = None
+    response: ClassVar[dict[str, object] | Exception | None] = None
 
     def __init__(self, *, timeout: float) -> None:
         self.timeout = timeout
 
-    def __enter__(self) -> "_EmbeddingClient":
+    def __enter__(self) -> _EmbeddingClient:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -173,8 +174,9 @@ class _EmbeddingClient:
     ) -> _EmbeddingResponse:
         texts = json["input"]
         assert isinstance(texts, list)
-        if type(self).response is not None:
-            return _EmbeddingResponse(type(self).response)
+        response = type(self).response
+        if response is not None:
+            return _EmbeddingResponse(response)
         items = [
             {
                 "index": index,
@@ -281,7 +283,7 @@ def test_remote_embedder_rejects_ragged_vectors(
     monkeypatch.setattr(_EmbeddingClient, "response", data)
     monkeypatch.setattr("ledger.providers.openai_compat.httpx.Client", _EmbeddingClient)
 
-    with pytest.raises(ProviderError, match="dimension|ragged"):
+    with pytest.raises(ProviderError, match=r"dimension|ragged"):
         _remote_embedder().encode(["one", "two"])
 
 
@@ -430,6 +432,7 @@ def test_api_headers_use_bearer_token_and_preserve_custom_headers() -> None:
 
     assert headers["Content-Type"] == "application/json"
     assert headers["X-Custom-Header"] == "custom-value"
+
 
 # ---------------------------------------------------------------------------
 # retrieval index

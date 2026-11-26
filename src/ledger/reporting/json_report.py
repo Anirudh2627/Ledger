@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ledger.reporting.report import Report
@@ -9,10 +10,17 @@ from ledger.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
 
 def render_json(report: Report, *, indent: int = 2) -> str:
     """Serialize the full report (machine-readable, schema-versioned)."""
     return report.model_dump_json(indent=indent)
+
+
+def safe_report_basename(value: str) -> str:
+    """Return one safe filename component for a report."""
+    return _UNSAFE_FILENAME_CHARS.sub("_", value).strip(" .") or "report"
 
 
 def write_reports(
@@ -28,10 +36,11 @@ def write_reports(
     """
     directory = Path(out_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    stem = basename or (
+    requested_stem = basename or (
         f"comparison_{report.baseline.system_version}_vs_"
         f"{report.candidate.system_version}_{report.generated_at.strftime('%Y%m%dT%H%M%SZ')}"
     )
+    stem = safe_report_basename(requested_stem)
     json_path = directory / f"{stem}.json"
     md_path = directory / f"{stem}.md"
     json_path.write_text(render_json(report) + "\n", encoding="utf-8")

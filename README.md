@@ -10,9 +10,10 @@ model, retrieval setting, or system config changes:
 
 It runs a versioned golden dataset against two versions of your system
 (baseline vs candidate), scores every answer with deterministic metrics and a
-calibrated LLM-as-a-judge, compares the paired results with bootstrap
-statistics, applies a YAML-configured regression policy, and turns the whole
-thing into a CI quality gate with human-readable reports.
+calibrated LLM-as-a-judge, compares paired results with bootstrap confidence
+intervals and sign-flip permutation tests, applies a YAML-configured regression
+policy, and turns the whole thing into a CI quality gate with human-readable
+reports.
 
 ```text
 AI application changes → automated evaluation → statistical comparison
@@ -101,7 +102,7 @@ gate that blocks merges when the evidence says so — with reports that explain
                     └──────────┬──────────┘
                                ▼
                     ┌─────────────────────┐
-                    │ Regression Engine   │  paired bootstrap CI + p-values,
+                    │ Regression Engine   │  paired bootstrap CI + permutation p-values,
                     │                     │  sign test, policy rules
                     └──────────┬──────────┘
                     ┌──────────┴───────────┐
@@ -125,7 +126,7 @@ Full component walkthrough, data model and extension guide:
 | **Deterministic metrics** | Mechanical checks in [0,1]: token F1, key-term coverage, citation presence, retrieval hit, refusal match, JSON validity, length compliance. `None` = not applicable. |
 | **LLM-as-a-judge** | Rubric judge scoring correctness / relevance / groundedness / instruction-following (1-5), strict JSON contract, repair retries, recomputed aggregates. Failures are data, never crashes. |
 | **Judge calibration** | Agreement between judge and human labels: MAE, Pearson/Spearman, within-±1 agreement, pass agreement, Cohen's κ. |
-| **Paired comparison** | Same cases on both sides ⇒ per-case deltas ⇒ paired percentile bootstrap CI + p-value per metric/category/critical slice, plus an exact sign test on pass/fail flips. |
+| **Paired comparison** | Same cases on both sides ⇒ per-case deltas ⇒ paired percentile bootstrap CI and paired sign-flip permutation p-value per metric/category/critical slice, plus an exact sign test on pass/fail flips. |
 | **Regression policy** | YAML thresholds & rules (never code): overall/categories/critical bands, per-metric thresholds, newly-failing budgets, judge-failure-rate integrity rule, significance requirement. |
 | **Gate decision** | `PASS` / `WARNING` / `FAIL` with machine-readable rule ids and human messages; WARNING exits 0 by default, FAIL exits 1. |
 
@@ -151,7 +152,7 @@ Full component walkthrough, data model and extension guide:
 ├── data/corpus/         # sample RAG knowledge base (fictional "Helios" docs)
 ├── configs/             # default / baseline / candidate / candidate_degraded / policy
 ├── scripts/             # evaluate.py, compare.py, calibrate_judge.py, generate_report.py, ci/gate.sh
-├── tests/               # 250 tests: unit + integration (offline), fixtures
+├── tests/               # unit + integration tests (offline), fixtures
 ├── docs/                # architecture, evaluation-methodology, ci-cd
 ├── .github/workflows/   # ci.yml (lint/types/tests) + llm-evaluation.yml (the gate)
 ├── experiments/         # append-only run registry (index.example.jsonl committed)
@@ -167,8 +168,8 @@ Requires Python **3.11+**. No GPU, no model downloads, no API keys needed for
 the default (mock) mode.
 
 ```bash
-git clone https://github.com/your-org/ledger.git
-cd ledger
+git clone https://github.com/Anirudh2627/Ledger.git
+cd Ledger
 
 make install-dev      # venv + runtime & dev deps + editable install
 # or manually:
@@ -304,7 +305,11 @@ No `candidate_mean < baseline_mean` hand-waving. Per metric, category and the
 critical slice, Ledger computes **paired** per-case deltas, then:
 
 * **Paired percentile bootstrap** (default 2000 resamples, seeded): mean
-  delta, 95% CI, two-sided bootstrap p-value (floored at 1/n_samples).
+  delta and 95% CI. This interval is reported separately from the hypothesis
+  test and is not, by itself, the gate's significance decision.
+* **Paired sign-flip permutation test**: two-sided p-value for the mean paired
+  difference, exact through 16 pairs and seeded Monte Carlo beyond that.
+  Validity assumes paired exchangeability/symmetry under the null.
 * **Exact sign test** on pass/fail flips (assumption-free corroboration).
 * **Policy rules** (`configs/policy.yaml`, all values configurable):
 
@@ -342,7 +347,8 @@ Two workflows (full guide: **[docs/ci-cd.md](docs/ci-cd.md)**):
   2. lint + unit tests (fast feedback)
   3. resolve provider mode: **mock by default**; real provider via
      `workflow_dispatch` input + repository secrets (`LEDGER_PROVIDER_API_KEY`,
-     `LEDGER_JUDGE_API_KEY`, base URLs, models — never hardcoded)
+     `LEDGER_JUDGE_API_KEY`, base URLs, model IDs — never hardcoded); the
+     scheduled workflow selects real mode only when all six secrets exist
   4. evaluate baseline (cached via `actions/cache` in mock mode, keyed on
      configs+dataset+code hashes) and candidate
   5. `scripts/ci/gate.sh` → exit-code contract decides the check
@@ -367,7 +373,7 @@ image's `HEALTHCHECK` verifies the package imports and the CLI responds.
 ## Testing
 
 ```bash
-make test          # 250 tests, ~2s, fully offline
+make test          # unit + integration tests, fully offline
 make coverage      # ~90% statement coverage of src/ledger
 make lint && make typecheck
 ```
@@ -498,6 +504,11 @@ Markdown/JSON equivalents: [`reports/example/comparison_fail_mock.md`](reports/e
 * Bootstrap CIs at n≈40 are wide; `require_significance` prevents false
   blocks but also means small real regressions may only WARN. Grow the
   dataset for power.
+* Ledger does not apply multiplicity correction across overall, category, and
+  configured-metric comparisons. This can inflate familywise false-positive
+  risk; one synthetic experiment with 10 independent null comparisons
+  produced a 19.2% gate-failure rate. That result is illustrative, not
+  universal. Selecting a correction method is a future policy decision.
 * Real-provider determinism cannot be guaranteed (hosted APIs); Ledger
   mitigates via temperature 0, seeds, and statistics — not via promises.
 * Single-process artifact store (JSONL/JSON files). Fine for CI-scale

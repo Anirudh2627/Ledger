@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import numpy as np
 import pytest
@@ -110,7 +111,7 @@ def test_extreme_finite_values_cannot_produce_nonfinite_statistics() -> None:
 
 def test_bootstrap_requires_integer_sample_count() -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        paired_bootstrap([0.1], [0.2], n_samples=1.5)
+        paired_bootstrap([0.1], [0.2], n_samples=cast(int, 1.5))
 
 
 def test_p_value_uses_exact_paired_sign_flip_permutation() -> None:

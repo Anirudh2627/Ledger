@@ -2,11 +2,30 @@
 
 from __future__ import annotations
 
+import html
+import re
+
 from ledger.core.models import RunSummary
 from ledger.regression.comparator import MetricComparison
 from ledger.reporting.report import Report
 
 _STATUS_EMOJI = {"PASS": ":white_check_mark:", "WARNING": ":warning:", "FAIL": ":x:"}
+_MARKDOWN_SPECIAL_CHARS = re.compile(r"([\\`*_{}\[\]()#+.!|~-])")
+
+
+def _md_text(value: object) -> str:
+    text = html.escape(str(value), quote=False).replace("\r\n", "\n").replace("\r", "\n")
+    text = _MARKDOWN_SPECIAL_CHARS.sub(r"\\\1", text)
+    return text.replace("\n", "<br>")
+
+
+def _md_code(value: object) -> str:
+    text = html.escape(str(value), quote=False).replace("\r\n", " ").replace("\r", " ")
+    text = text.replace("\n", " ").replace("|", "&#124;")
+    longest_tick_run = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest_tick_run + 1)
+    padding = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{padding}{text}{padding}{fence}"
 
 
 def _fmt(value: float | None, digits: int = 4) -> str:
@@ -33,7 +52,7 @@ def _metric_row(comp: MetricComparison) -> str:
     elif comp.significant_improvement:
         flag = " :green_circle:"
     return (
-        f"| `{comp.metric}` | {comp.n_paired} | {_fmt(comp.baseline_mean)} | "
+        f"| {_md_code(comp.metric)} | {comp.n_paired} | {_fmt(comp.baseline_mean)} | "
         f"{_fmt(comp.candidate_mean)} | {_fmt_signed(comp.delta)} | "
         f"{_fmt_pct(comp.relative_delta)} | {ci} | {_fmt(comp.p_value, 3)} |{flag}"
     )
@@ -65,12 +84,13 @@ def render_markdown(report: Report) -> str:
         "",
         f"- Generated: {report.generated_at.isoformat(timespec='seconds')} "
         f"(ledger {report.ledger_version}, report schema {report.schema_version})",
-        f"- Baseline: `{report.baseline.system_version}` "
-        f"(run `{report.baseline.run_id}`, model `{report.baseline.model or '?'}`, "
-        f"prompt `{report.baseline.prompt_version or '?'}`)",
-        f"- Candidate: `{report.candidate.system_version}` "
-        f"(run `{report.candidate.run_id}`, model `{report.candidate.model or '?'}`, "
-        f"prompt `{report.candidate.prompt_version or '?'}`)",
+        f"- Baseline: {_md_code(report.baseline.system_version)} "
+        f"(run {_md_code(report.baseline.run_id)}, model {_md_code(report.baseline.model or '?')}, "
+        f"prompt {_md_code(report.baseline.prompt_version or '?')})",
+        f"- Candidate: {_md_code(report.candidate.system_version)} "
+        f"(run {_md_code(report.candidate.run_id)}, "
+        f"model {_md_code(report.candidate.model or '?')}, "
+        f"prompt {_md_code(report.candidate.prompt_version or '?')})",
         f"- Paired cases: {report.comparison.n_common} "
         f"(baseline {report.comparison.n_baseline}, candidate {report.comparison.n_candidate})",
         f"- Dataset fingerprint match: {report.comparison.dataset_fingerprint_match}",
@@ -107,7 +127,7 @@ def render_markdown(report: Report) -> str:
     ]
     for name in sorted(report.comparison.categories):
         comp = report.comparison.categories[name]
-        display = "**critical cases**" if name == "__critical__" else f"`{name}`"
+        display = "**critical cases**" if name == "__critical__" else _md_code(name)
         ci = (
             f"[{comp.ci_low:+.4f}, {comp.ci_high:+.4f}]"
             if comp.ci_low is not None and comp.ci_high is not None
@@ -158,7 +178,8 @@ def render_markdown(report: Report) -> str:
         lines += ["| severity | rule | detail |", "|---|---|---|"]
         for violation in decision.violations:
             lines.append(
-                f"| {violation.severity.upper()} | `{violation.rule}` | {violation.message} |"
+                f"| {_md_text(violation.severity.upper())} | "
+                f"{_md_code(violation.rule)} | {_md_text(violation.message)} |"
             )
         lines.append("")
 
@@ -167,28 +188,29 @@ def render_markdown(report: Report) -> str:
         for excerpt in report.top_regressions:
             crit = " **[CRITICAL]**" if excerpt.critical else ""
             lines += [
-                f"### `{excerpt.test_id}`{crit} - {excerpt.category} "
+                f"### {_md_code(excerpt.test_id)}{crit} - {_md_text(excerpt.category)} "
                 f"({_fmt_signed(excerpt.delta)})",
                 "",
-                f"- Question: {excerpt.question}",
+                f"- Question: {_md_text(excerpt.question)}",
                 f"- Score: {_fmt(excerpt.baseline_overall)} -> "
                 f"{_fmt(excerpt.candidate_overall)} | passed: "
                 f"{excerpt.baseline_passed} -> {excerpt.candidate_passed}",
-                f"- Baseline answer: {excerpt.baseline_answer}",
-                f"- Candidate answer: {excerpt.candidate_answer}",
+                f"- Baseline answer: {_md_text(excerpt.baseline_answer)}",
+                f"- Candidate answer: {_md_text(excerpt.candidate_answer)}",
             ]
             if excerpt.candidate_judge_reason:
-                lines.append(f"- Judge (candidate): {excerpt.candidate_judge_reason}")
+                lines.append(f"- Judge (candidate): {_md_text(excerpt.candidate_judge_reason)}")
             lines.append("")
 
     lines += [
         "## Method",
         "",
         f"- Comparison: paired per-case deltas over {report.comparison.n_common} common test ids.",
-        f"- CI: {method.get('bootstrap', 'paired_percentile')} bootstrap, "
-        f"{method.get('n_samples')} resamples, confidence {method.get('confidence')}, "
-        f"seed {method.get('seed')}.",
-        f"- Hypothesis test: {method.get('p_value', 'paired_sign_flip_permutation')} p-value; "
+        f"- CI: {_md_text(method.get('bootstrap', 'paired_percentile'))} bootstrap, "
+        f"{_md_text(method.get('n_samples'))} resamples, "
+        f"confidence {_md_text(method.get('confidence'))}, seed {_md_text(method.get('seed'))}.",
+        f"- Hypothesis test: {_md_text(method.get('p_value', 'paired_sign_flip_permutation'))} "
+        "p-value; "
         "the confidence interval is reported separately. The gate also requires the "
         "policy's minimum paired sample.",
         "- The metric-table bootstrap significance marker indicates CI exclusion only; "
@@ -200,10 +222,13 @@ def render_markdown(report: Report) -> str:
         "## Notes",
         "",
     ]
-    lines += [f"- {note}" for note in report.notes]
+    lines += [f"- {_md_text(note)}" for note in report.notes]
     if report.artifacts:
         lines += ["", "## Artifacts", ""]
-        lines += [f"- `{name}`: `{path}`" for name, path in sorted(report.artifacts.items())]
+        lines += [
+            f"- {_md_code(name)}: {_md_code(path)}"
+            for name, path in sorted(report.artifacts.items())
+        ]
     lines += ["", "---", "*Generated by Ledger.*", ""]
     return "\n".join(lines)
 
@@ -211,19 +236,21 @@ def render_markdown(report: Report) -> str:
 def render_run_markdown(summary: RunSummary) -> str:
     """Render a single-run report (no comparison)."""
     lines = [
-        f"# Ledger Run Report - `{summary.system_version}`",
+        f"# Ledger Run Report - {_md_code(summary.system_version)}",
         "",
-        f"- Run id: `{summary.run_id}`",
+        f"- Run id: {_md_code(summary.run_id)}",
         f"- Created: {summary.created_at.isoformat(timespec='seconds')}",
-        f"- Dataset: `{summary.dataset.path}` ({summary.dataset.n_cases} cases, "
-        f"sha256 `{summary.dataset.fingerprint[:12]}...`)",
-        f"- Provider: `{summary.provider.name}` model `{summary.provider.model}` "
+        f"- Dataset: {_md_code(summary.dataset.path)} ({summary.dataset.n_cases} cases, "
+        f"sha256 {_md_code(summary.dataset.fingerprint[:12] + '...')})",
+        f"- Provider: {_md_code(summary.provider.name)} model {_md_code(summary.provider.model)} "
         f"(mock={summary.provider.is_mock})",
         "- Judge: "
         + (
-            f"`{summary.judge.name}` model `{summary.judge.model}`" if summary.judge else "disabled"
+            f"{_md_code(summary.judge.name)} model {_md_code(summary.judge.model)}"
+            if summary.judge
+            else "disabled"
         ),
-        f"- Prompt version: `{summary.prompt_version or '-'}`",
+        f"- Prompt version: {_md_code(summary.prompt_version or '-')}",
         "",
         "## Headline metrics",
         "",
@@ -231,7 +258,7 @@ def render_run_markdown(summary: RunSummary) -> str:
         "|---|---|",
     ]
     for name in sorted(summary.metrics):
-        lines.append(f"| `{name}` | {summary.metrics[name]:.4f} |")
+        lines.append(f"| {_md_code(name)} | {summary.metrics[name]:.4f} |")
     counts = summary.counts
     lines += [
         "",
@@ -259,11 +286,11 @@ def render_run_markdown(summary: RunSummary) -> str:
         ]
         for name, agg in sorted(summary.categories.items()):
             lines.append(
-                f"| `{name}` | {agg.n} | {_fmt(agg.overall_mean)} | {_fmt(agg.pass_rate)} |"
+                f"| {_md_code(name)} | {agg.n} | {_fmt(agg.overall_mean)} | {_fmt(agg.pass_rate)} |"
             )
     system_info = summary.runtime.get("system")
     if system_info:
         lines += ["", "## System under test", ""]
-        lines += [f"- `{k}`: `{v}`" for k, v in sorted(system_info.items())]
+        lines += [f"- {_md_code(k)}: {_md_code(v)}" for k, v in sorted(system_info.items())]
     lines += ["", "---", "*Generated by Ledger.*", ""]
     return "\n".join(lines)

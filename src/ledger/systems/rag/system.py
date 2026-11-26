@@ -32,7 +32,7 @@ def build_embedder_from_config(config: RagSystemConfig) -> Embedder:
     """Instantiate the configured embedder (offline hashing or HTTP)."""
     if config.embedder.name == "hashing_tfidf":
         return HashingTfIdfEmbedder(dim=config.embedder.dim)
-    return OpenAICompatEmbedder(config.embedder)  # type: ignore[return-value]
+    return OpenAICompatEmbedder(config.embedder)
 
 
 @register_system("rag")

@@ -237,9 +237,7 @@ class OpenAICompatEmbedder:
                     try:
                         data = response.json()
                     except (json.JSONDecodeError, ValueError) as exc:
-                        raise ProviderError(
-                            f"malformed embedding response JSON: {exc}"
-                        ) from exc
+                        raise ProviderError(f"malformed embedding response JSON: {exc}") from exc
             except (httpx.HTTPStatusError, httpx.TransportError, KeyError, TypeError) as exc:
                 last_error = ProviderError(f"embedding request failed: {exc}")
                 if isinstance(exc, httpx.HTTPStatusError):
@@ -287,7 +285,9 @@ class OpenAICompatEmbedder:
 
             index = item["index"]
             if isinstance(index, bool) or not isinstance(index, int):
-                raise ProviderError("malformed embedding response: embedding index must be an integer")
+                raise ProviderError(
+                    "malformed embedding response: embedding index must be an integer"
+                )
             if index < 0 or index >= batch_size:
                 raise ProviderError(
                     f"malformed embedding response: embedding index {index} out of range "

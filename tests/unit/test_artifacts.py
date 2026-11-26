@@ -38,6 +38,12 @@ def test_run_id_slugifies_version(store) -> None:
     assert "candidate-v2-weird-name" in run_id
 
 
+@pytest.mark.parametrize("run_id", ["../outside", r"..\outside", "", r"C:\outside", ".. "])
+def test_run_id_cannot_escape_results_directory(store, run_id: str) -> None:
+    with pytest.raises(ValueError, match="run id"):
+        store.run_dir(run_id)
+
+
 def test_results_round_trip(store) -> None:
     results = [make_result("t1"), make_result("t2", passed=False, overall=0.2)]
     summary = make_summary("run-a", "sysA", results)

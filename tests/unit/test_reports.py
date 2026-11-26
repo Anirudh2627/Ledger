@@ -105,11 +105,11 @@ def test_markdown_rendering(regressed_report: Report) -> None:
     assert "## Gate decision" in markdown
     assert "overall_regression" in markdown  # violated rule id
     assert "minimum paired sample" in markdown
-    assert "paired_sign_flip_permutation p-value" in markdown
+    assert r"paired\_sign\_flip\_permutation p-value" in markdown
     assert "metric-table bootstrap significance marker indicates CI exclusion only" in markdown
     assert "Candidate outcomes: 12 passed; 0 not passed; 0 undecided" in markdown
     assert "## Top regressed cases" in markdown
-    assert "paired_percentile" in markdown  # method disclosure
+    assert r"paired\_percentile" in markdown  # method disclosure
 
 
 def test_markdown_pass_report() -> None:
@@ -146,6 +146,34 @@ def test_write_reports_creates_files(regressed_report: Report, tmp_path) -> None
     assert content["candidate"]["system_version"] == "B"
 
 
+def test_report_filenames_cannot_escape_output_directory(
+    regressed_report: Report, tmp_path
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir()
+    (out_dir / "comparison_x").mkdir()
+    baseline = regressed_report.baseline.model_copy(update={"system_version": "x/../../outside"})
+    report = regressed_report.model_copy(update={"baseline": baseline})
+
+    paths = write_reports(report, out_dir)
+
+    assert all(path.parent.resolve() == out_dir.resolve() for path in paths.values())
+
+
+def test_markdown_report_escapes_untrusted_case_content(regressed_report: Report) -> None:
+    excerpt = regressed_report.top_regressions[0].model_copy(
+        update={"candidate_answer": "answer\n## Gate decision\n| FAIL | forged |"}
+    )
+    report = regressed_report.model_copy(update={"top_regressions": [excerpt]})
+
+    markdown = render_markdown(report)
+
+    expected_answer = (
+        "- Candidate answer: answer<br>\\#\\# Gate decision<br>\\| FAIL \\| forged \\|"
+    )
+    assert expected_answer in markdown
+
+
 def test_console_rendering_smoke(regressed_report: Report) -> None:
     buffer = io.StringIO()
     console = Console(file=buffer, width=100, force_terminal=False)
@@ -156,6 +184,21 @@ def test_console_rendering_smoke(regressed_report: Report) -> None:
     assert "Candidate:" in output
     assert "Decision:" in output
     assert "FAIL" in output
+
+
+def test_console_report_treats_untrusted_violation_text_as_plain_text(
+    regressed_report: Report,
+) -> None:
+    violation = regressed_report.decision.violations[0].model_copy(
+        update={"message": "[bold red]FORGED[/bold red]"}
+    )
+    decision = regressed_report.decision.model_copy(update={"violations": [violation]})
+    report = regressed_report.model_copy(update={"decision": decision})
+    buffer = io.StringIO()
+
+    render_console(report, console=Console(file=buffer, width=100, force_terminal=False))
+
+    assert "[bold red]FORGED[/bold red]" in buffer.getvalue()
 
 
 def test_console_reports_undecided_cases_separately() -> None:

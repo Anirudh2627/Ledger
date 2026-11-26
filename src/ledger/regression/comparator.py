@@ -186,6 +186,8 @@ class RunData:
             raise ValueError("run summary judge state does not match saved configuration")
 
         for result in self.results:
+            expected_score: float | None
+            expected_passed: bool | None
             if result.error is not None:
                 if (
                     result.judge_failed

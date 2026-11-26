@@ -78,16 +78,20 @@ Create repository secrets (Settings → Secrets and variables → Actions):
 | Secret | Purpose |
 |---|---|
 | `LEDGER_PROVIDER_API_KEY` | SUT generation API key |
-| `LEDGER_PROVIDER_BASE_URL` | OpenAI-compatible endpoint (if not default) |
+| `LEDGER_PROVIDER_BASE_URL` | Required OpenAI-compatible endpoint base URL |
 | `LEDGER_PROVIDER_MODEL` | model id for the SUT |
 | `LEDGER_JUDGE_API_KEY` | judge API key (a *different*, ideally stronger model recommended) |
-| `LEDGER_JUDGE_BASE_URL` / `LEDGER_JUDGE_MODEL` | judge endpoint/model |
+| `LEDGER_JUDGE_BASE_URL` | Required judge endpoint base URL |
+| `LEDGER_JUDGE_MODEL` | Judge model id |
 
-Then either:
+All six SUT/judge API key, base URL, and model secrets are required to activate
+real-provider mode. With an incomplete set, the workflow reports the
+requirement and uses deterministic mock mode. Then either:
 
 * run the workflow manually: **Actions → LLM Evaluation Gate → Run
   workflow → use_real_provider = true**, or
-* rely on the nightly schedule (it auto-detects whether secrets exist).
+* rely on the nightly schedule (it selects real mode when all six secrets
+  exist; otherwise it runs in mock mode).
 
 Cost/latency controls for real runs:
 

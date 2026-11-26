@@ -87,25 +87,73 @@ jobs:
         id: mode
         env:
           USE_REAL: ${{ inputs.use_real_provider }}
-          HAS_KEY: ${{ secrets.LEDGER_PROVIDER_API_KEY != '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          HAS_PROVIDER_KEY: ${{ secrets.LEDGER_PROVIDER_API_KEY != '' }}
+          HAS_PROVIDER_URL: ${{ secrets.LEDGER_PROVIDER_BASE_URL != '' }}
+          HAS_PROVIDER_MODEL: ${{ secrets.LEDGER_PROVIDER_MODEL != '' }}
+          HAS_JUDGE_KEY: ${{ secrets.LEDGER_JUDGE_API_KEY != '' }}
+          HAS_JUDGE_URL: ${{ secrets.LEDGER_JUDGE_BASE_URL != '' }}
+          HAS_JUDGE_MODEL: ${{ secrets.LEDGER_JUDGE_MODEL != '' }}
         run: |
-          if [ "${USE_REAL:-false}" = "true" ] && [ -n "$HAS_KEY" ]; then
+          WANT_REAL="${USE_REAL:-false}"
+          if [[ "$EVENT_NAME" == "schedule" ]]; then WANT_REAL="true"; fi
+          if [[ "$WANT_REAL" == "true" \
+            && "$HAS_PROVIDER_KEY" == "true" && "$HAS_PROVIDER_URL" == "true" \
+            && "$HAS_PROVIDER_MODEL" == "true" && "$HAS_JUDGE_KEY" == "true" \
+            && "$HAS_JUDGE_URL" == "true" && "$HAS_JUDGE_MODEL" == "true" ]]; then
             echo "mock=0" >> "$GITHUB_OUTPUT"
+            echo "provider_name=openai_compat" >> "$GITHUB_OUTPUT"
+            echo "judge_name=openai_compat" >> "$GITHUB_OUTPUT"
             echo "Real-provider mode: evaluations will call the configured API."
           else
             echo "mock=1" >> "$GITHUB_OUTPUT"
-            echo "Mock mode: deterministic offline evaluation."
+            echo "provider_name=mock" >> "$GITHUB_OUTPUT"
+            echo "judge_name=mock" >> "$GITHUB_OUTPUT"
+            if [[ "$WANT_REAL" == "true" ]]; then
+              echo "Real mode requires SUT and judge API keys, base URLs, and model IDs; using mock mode."
+            else
+              echo "Mock mode: deterministic offline evaluation."
+            fi
           fi
 
       - name: Resolve configs
         id: cfg
+        env:
+          BASELINE_CONFIG_INPUT: ${{ inputs.baseline_config }}
+          CANDIDATE_CONFIG_INPUT: ${{ inputs.candidate_config }}
+          LIMIT_INPUT: ${{ inputs.limit }}
         run: |
-          BASE="${{ inputs.baseline_config }}"
-          CAND="${{ inputs.candidate_config }}"
-          echo "baseline=${BASE:-configs/baseline.yaml}" >> "$GITHUB_OUTPUT"
-          echo "candidate=${CAND:-configs/candidate.yaml}" >> "$GITHUB_OUTPUT"
-          LIMIT="${{ inputs.limit }}"
-          echo "limit=${LIMIT}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          for value in "$BASELINE_CONFIG_INPUT" "$CANDIDATE_CONFIG_INPUT" "$LIMIT_INPUT"; do
+            if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+              echo "Workflow inputs must not contain line breaks." >&2
+              exit 3
+            fi
+          done
+          baseline="${BASELINE_CONFIG_INPUT:-configs/baseline.yaml}"
+          candidate="${CANDIDATE_CONFIG_INPUT:-configs/candidate.yaml}"
+          limit="$LIMIT_INPUT"
+          if [[ ! -f "$baseline" || ! -f "$candidate" ]]; then
+            echo "Both config inputs must name existing files in the workspace." >&2
+            exit 3
+          fi
+          workspace_root="$(realpath "$GITHUB_WORKSPACE")"
+          baseline_path="$(realpath -e -- "$baseline")"
+          candidate_path="$(realpath -e -- "$candidate")"
+          case "$baseline_path" in
+            "$workspace_root"/*) baseline="${baseline_path#"$workspace_root"/}" ;;
+            *) echo "Baseline config must be inside the workspace." >&2; exit 3 ;;
+          esac
+          case "$candidate_path" in
+            "$workspace_root"/*) candidate="${candidate_path#"$workspace_root"/}" ;;
+            *) echo "Candidate config must be inside the workspace." >&2; exit 3 ;;
+          esac
+          if [[ -n "$limit" && ! "$limit" =~ ^[1-9][0-9]*$ ]]; then
+            echo "The evaluation limit must be a positive integer." >&2
+            exit 3
+          fi
+          printf 'baseline=%s\ncandidate=%s\nlimit=%s\n' \
+            "$baseline" "$candidate" "$limit" >> "$GITHUB_OUTPUT"
 
       # Baseline runs are cacheable: same config + same dataset + same code =>
       # same results in mock mode. Real-provider mode skips the cache because
@@ -118,7 +166,8 @@ jobs:
           path: results/baseline-cache
           key: >-
             ledger-baseline-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
-            ${{ hashFiles('configs/**', 'datasets/golden.jsonl',
+            limit-${{ steps.cfg.outputs.limit || 'all' }}-
+            ${{ hashFiles(steps.cfg.outputs.baseline, 'configs/**', 'datasets/golden.jsonl',
                         'data/corpus/**', 'src/ledger/**',
                         'requirements.txt') }}
 
@@ -130,20 +179,23 @@ jobs:
           LEDGER_JUDGE_API_KEY: ${{ secrets.LEDGER_JUDGE_API_KEY }}
           LEDGER_JUDGE_BASE_URL: ${{ secrets.LEDGER_JUDGE_BASE_URL }}
           LEDGER_JUDGE_MODEL: ${{ secrets.LEDGER_JUDGE_MODEL }}
+          LEDGER_PROVIDER_NAME: ${{ steps.mode.outputs.provider_name }}
+          LEDGER_JUDGE_NAME: ${{ steps.mode.outputs.judge_name }}
+          MOCK_MODE: ${{ steps.mode.outputs.mock }}
+          BASELINE_CONFIG: ${{ steps.cfg.outputs.baseline }}
+          EVAL_LIMIT: ${{ steps.cfg.outputs.limit }}
         run: |
           set -euo pipefail
-          MOCK_FLAG=""
-          if [ "${{ steps.mode.outputs.mock }}" = "1" ]; then MOCK_FLAG="--mock"; fi
-          LIMIT_FLAG=""
-          if [ -n "${{ steps.cfg.outputs.limit }}" ]; then
-            LIMIT_FLAG="--limit ${{ steps.cfg.outputs.limit }}"
-          fi
+          mock_flags=()
+          if [[ "$MOCK_MODE" == "1" ]]; then mock_flags=(--mock); fi
+          limit_flags=()
+          if [[ -n "$EVAL_LIMIT" ]]; then limit_flags=(--limit "$EVAL_LIMIT"); fi
           CACHE_DIR="results/baseline-cache"
-          if [ "${{ steps.mode.outputs.mock }}" = "1" ] && [ -f "$CACHE_DIR/summary.json" ]; then
+          if [[ "$MOCK_MODE" == "1" && -f "$CACHE_DIR/summary.json" ]]; then
             echo "Reusing cached baseline run from $CACHE_DIR"
           else
-            ledger evaluate --config "${{ steps.cfg.outputs.baseline }}" \
-              --run-id baseline-cache $LIMIT_FLAG $MOCK_FLAG
+            ledger evaluate --config "$BASELINE_CONFIG" --run-id baseline-cache \
+              "${limit_flags[@]}" "${mock_flags[@]}"
           fi
 
       - name: Evaluate candidate
@@ -154,16 +206,19 @@ jobs:
           LEDGER_JUDGE_API_KEY: ${{ secrets.LEDGER_JUDGE_API_KEY }}
           LEDGER_JUDGE_BASE_URL: ${{ secrets.LEDGER_JUDGE_BASE_URL }}
           LEDGER_JUDGE_MODEL: ${{ secrets.LEDGER_JUDGE_MODEL }}
+          LEDGER_PROVIDER_NAME: ${{ steps.mode.outputs.provider_name }}
+          LEDGER_JUDGE_NAME: ${{ steps.mode.outputs.judge_name }}
+          MOCK_MODE: ${{ steps.mode.outputs.mock }}
+          CANDIDATE_CONFIG: ${{ steps.cfg.outputs.candidate }}
+          EVAL_LIMIT: ${{ steps.cfg.outputs.limit }}
         run: |
           set -euo pipefail
-          MOCK_FLAG=""
-          if [ "${{ steps.mode.outputs.mock }}" = "1" ]; then MOCK_FLAG="--mock"; fi
-          LIMIT_FLAG=""
-          if [ -n "${{ steps.cfg.outputs.limit }}" ]; then
-            LIMIT_FLAG="--limit ${{ steps.cfg.outputs.limit }}"
-          fi
-          ledger evaluate --config "${{ steps.cfg.outputs.candidate }}" \
-            --run-id candidate-current $LIMIT_FLAG $MOCK_FLAG
+          mock_flags=()
+          if [[ "$MOCK_MODE" == "1" ]]; then mock_flags=(--mock); fi
+          limit_flags=()
+          if [[ -n "$EVAL_LIMIT" ]]; then limit_flags=(--limit "$EVAL_LIMIT"); fi
+          ledger evaluate --config "$CANDIDATE_CONFIG" \
+            --run-id candidate-current "${limit_flags[@]}" "${mock_flags[@]}"
 
       - name: Regression gate (baseline vs candidate)
         id: gate
