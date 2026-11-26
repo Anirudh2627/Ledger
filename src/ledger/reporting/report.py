@@ -39,10 +39,13 @@ class RunReference(BaseModel):
     prompt_version: str | None = None
     dataset_fingerprint: str | None = None
     n_cases: int = 0
+    passed: int = 0
     overall_mean: float | None = None
     pass_rate: float | None = None
     failed: int = 0
     errored: int = 0
+    not_passed: int = 0
+    undecided: int = 0
     judge_failed: int = 0
 
 
@@ -94,10 +97,13 @@ def _run_reference(summary: RunSummary) -> RunReference:
         prompt_version=summary.prompt_version,
         dataset_fingerprint=summary.dataset.fingerprint,
         n_cases=summary.dataset.n_cases,
+        passed=summary.counts.passed,
         overall_mean=summary.metrics.get("overall"),
         pass_rate=summary.metrics.get("pass_rate"),
         failed=summary.counts.failed,
         errored=summary.counts.errored,
+        not_passed=summary.counts.not_passed,
+        undecided=summary.counts.total - summary.counts.passed - summary.counts.not_passed,
         judge_failed=summary.counts.judge_failed,
     )
 

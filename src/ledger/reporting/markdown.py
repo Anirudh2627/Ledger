@@ -92,7 +92,7 @@ def render_markdown(report: Report) -> str:
     lines += [
         "## Metrics",
         "",
-        "| metric | n | baseline | candidate | delta | rel. | CI | p | sig. |",
+        "| metric | n | baseline | candidate | delta | rel. | CI | p | CI excludes 0? |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for name in sorted(report.comparison.metrics):
@@ -128,6 +128,10 @@ def render_markdown(report: Report) -> str:
         "",
         "## Test movement",
         "",
+        f"- Candidate outcomes: {report.candidate.passed} passed; "
+        f"{report.candidate.not_passed} not passed; "
+        f"{report.candidate.undecided} undecided "
+        f"(failed decisions: {report.candidate.failed}; errors: {report.candidate.errored}).",
         f"- Regressed: **{n_regressed}**  |  Improved: **{n_improved}**  |  "
         f"Stable pass: {n_stable_pass}  |  Stable fail: {n_stable_fail}",
         f"- Newly failing tests: {len(counts.newly_failing)}"
@@ -181,9 +185,14 @@ def render_markdown(report: Report) -> str:
         "## Method",
         "",
         f"- Comparison: paired per-case deltas over {report.comparison.n_common} common test ids.",
-        f"- Statistics: {method.get('bootstrap', 'paired_percentile')} bootstrap, "
-        f"{method.get('n_samples')} resamples, "
-        f"confidence {method.get('confidence')}, seed {method.get('seed')}.",
+        f"- CI: {method.get('bootstrap', 'paired_percentile')} bootstrap, "
+        f"{method.get('n_samples')} resamples, confidence {method.get('confidence')}, "
+        f"seed {method.get('seed')}.",
+        f"- Hypothesis test: {method.get('p_value', 'paired_sign_flip_permutation')} p-value; "
+        "the confidence interval is reported separately. The gate also requires the "
+        "policy's minimum paired sample.",
+        "- The metric-table bootstrap significance marker indicates CI exclusion only; "
+        "it does not independently trigger a gate failure.",
         "- Judge overall/dimension scores normalized from 1-5 to 0-1; "
         "overall recomputed by Ledger from configured weights (judge-reported "
         "aggregates are diagnostics only).",

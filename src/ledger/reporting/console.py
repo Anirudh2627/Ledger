@@ -65,11 +65,12 @@ def render_console(report: Report, console: Console | None = None) -> None:
     n_regressed = sum(1 for c in counts.cases if c.status == "regressed")
     n_improved = sum(1 for c in counts.cases if c.status == "improved")
     cand = report.candidate
-    n_passed = cand.n_cases - cand.failed - cand.errored
     console.print(
         "Tests:\n"
-        f"  Passed (candidate):   {n_passed}\n"
-        f"  Failed (candidate):   {cand.failed} (+{cand.errored} errors)\n"
+        f"  Passed (candidate):   {cand.passed}\n"
+        f"  Not passed (candidate): {cand.not_passed}\n"
+        f"  Failed decisions:     {cand.failed}; errors: {cand.errored}\n"
+        f"  Undecided (candidate): {cand.undecided}\n"
         f"  Regressed:            {n_regressed}\n"
         f"  Improved:             {n_improved}\n"
         f"  Newly failing:        {len(counts.newly_failing)}\n"

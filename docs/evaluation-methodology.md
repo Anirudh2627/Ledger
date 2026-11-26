@@ -192,17 +192,34 @@ missed regressions (shipping bad ones).
 1. **Pair per case.** Same dataset ⇒ each case has (baseline, candidate)
    values. Pairing removes between-case variance - the dominant term -
    giving far more power at small n than unpaired tests.
-2. **Paired percentile bootstrap** per metric: resample case indices with
-   replacement (default 2000 draws, seeded), recompute the mean difference,
-   take the 2.5/97.5 percentiles as the CI, and derive a two-sided bootstrap
-   p-value (floored at 1/n_samples). No normality assumption; correct for
-   bounded, skewed score distributions.
-3. **Sign test on pass/fail flips**: exact binomial p-value over newly
-   failing vs newly passing cases - assumption-free corroboration.
-4. **Policy layer** turns statistics into decisions:
+2. **Paired percentile bootstrap CI** per metric: resample case indices with
+   replacement (default 2000 draws, seeded) and take the requested percentiles
+   of the resampled mean differences. This estimates an interval; it is not the
+   hypothesis-test p-value. In a fixed-seed null simulation at n=10 (1,000
+   trials and 2,000 bootstrap resamples per distribution), nominal 95% intervals
+   excluded zero in 11.3% of Normal, 12.1% of scaled t(df=3), and 15.3% of
+   centered-exponential trials. This is evidence of small-sample undercoverage
+   in those simulations, not a guarantee about all datasets. CI interpretation
+   remains separate from the gate's p-value decision.
+3. **Paired sign-flip permutation p-value** per metric: form the null
+   distribution by flipping the signs of paired differences and compare the
+   observed absolute mean difference with the two-sided permutation tail.
+   Ledger enumerates all sign patterns through 16 pairs and uses seeded Monte
+   Carlo permutations for larger samples, with a plus-one correction. Exact
+   validity requires pairwise exchangeability under the null (equivalently,
+   symmetric paired differences); this does not test every arbitrary,
+   asymmetric zero-mean distribution. The p-value, not CI exclusion, is the
+   gate's significance test.
+4. **Sign test on pass/fail flips**: exact binomial p-value over newly
+   failing vs newly passing cases - a separate assumption-free test of the
+   balance of flip directions.
+5. **Policy layer** turns statistics into decisions:
    * `require_significance: true` (default): a beyond-threshold drop only
-     FAILs when the CI excludes zero or p < α; otherwise WARNING. This is
-     the guard against noise-driven merge blocks.
+     FAILs when the paired sign-flip p-value is below α; otherwise WARNING.
+     The confidence interval is reported separately and is not an independent
+     gate test.
+     The gate also requires `min_paired_cases`; results below that minimum
+     remain WARNINGs regardless of the interval or p-value.
    * separate bands for overall / categories / critical slice / individual
      metrics; count budgets for newly failing tests and critical failures;
      a judge-failure-rate rule that fails *untrustworthy evaluations*.
@@ -227,10 +244,15 @@ process:
   categories = blind spots; grow the dataset from production failures.
 * **Judge noise floor**: if baseline-vs-baseline deltas approach your
   threshold, the threshold is meaningless - fix measurement first.
-* **Multiple comparisons**: with many metrics/categories, some will cross
-  thresholds by chance. Ledger mitigates by gating primarily on `overall` +
-  criticals + counts, treating per-metric rules as *configured* (opt-in)
-  rather than automatic.
+* **Multiple comparisons**: Ledger applies no multiplicity correction. It
+  evaluates `overall`, category slices (including the critical slice), and
+  configured per-metric thresholds; testing several comparisons can inflate
+  familywise false-positive risk. In one synthetic experiment with 10
+  independent null comparisons, n=10, zero thresholds, and 500 trials, the
+  gate failed in 19.2% of trials (95% Wilson interval: 16.0%-22.9%). This is
+  illustrative, not a universal rate: real comparisons may be dependent and
+  configured thresholds affect the result. Whether to apply a correction is a
+  future policy decision; none is applied currently.
 * **Goodhart**: any metric that blocks merges will be optimized; keep
   references behavior-level and rotate/extend cases periodically.
 * **Mock mode numbers** say nothing about real model quality. They validate

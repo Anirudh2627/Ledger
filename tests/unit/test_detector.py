@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
-from ledger.regression.comparator import RunData, compare_runs
-from ledger.regression.detector import detect_regressions
-from ledger.regression.policy import MetricThreshold, RegressionPolicy
+from ledger.regression.comparator import MetricComparison, RunData, compare_runs
+from ledger.regression.detector import _significant, detect_regressions
+from ledger.regression.policy import MetricThreshold, RegressionPolicy, ThresholdGroup
 from tests.helpers import make_result, make_summary
 
 pytestmark = pytest.mark.unit
@@ -124,6 +125,51 @@ def test_warning_band() -> None:
     assert any(v.rule == "overall_warning_band" for v in decision.warnings)
 
 
+@pytest.mark.parametrize(
+    ("candidate_score", "expected_status"),
+    [(0.095, "PASS"), (0.094, "WARNING")],
+)
+def test_relative_threshold_warning_band(candidate_score: float, expected_status: str) -> None:
+    base_results = [
+        make_result(
+            f"t{i}",
+            overall=0.1,
+            passed=True,
+            critical=False,
+            run_id="b",
+            system_version="A",
+        )
+        for i in range(12)
+    ]
+    candidate_results = [
+        make_result(
+            f"t{i}",
+            overall=candidate_score,
+            passed=True,
+            critical=False,
+            run_id="c",
+            system_version="B",
+        )
+        for i in range(12)
+    ]
+    base = RunData(make_summary("b", "A", base_results), base_results)
+    candidate = RunData(make_summary("c", "B", candidate_results), candidate_results)
+    policy = RegressionPolicy(
+        overall=ThresholdGroup(absolute=0.5, relative=0.1, warning_fraction=0.5),
+        min_paired_cases=10,
+    )
+
+    comparison, decision = _compare_and_decide(base, candidate, policy)
+
+    assert comparison.overall is not None
+    expected_delta = candidate_score - 0.1
+    assert comparison.overall.relative_delta == pytest.approx(expected_delta / 0.1)
+    assert decision.status == expected_status
+    if expected_status == "WARNING":
+        warning = next(v for v in decision.warnings if v.rule == "overall_warning_band")
+        assert "relative" in warning.message
+
+
 def test_critical_newly_failing_blocks() -> None:
     base, cand = _runs(
         [0.0] * 12,
@@ -163,6 +209,41 @@ def test_absolute_failed_tests_budget() -> None:
     assert any(v.rule == "failed_tests" for v in decision.fails)
 
 
+def test_one_sut_error_counts_once_against_failed_case_budget() -> None:
+    base_results = [make_result("t1", overall=0.8, passed=True, run_id="b", system_version="A")]
+    candidate_results = [
+        make_result(
+            "t1",
+            overall=0.0,
+            passed=False,
+            error="SUT failed",
+            run_id="c",
+            system_version="B",
+        )
+    ]
+    base = RunData(make_summary("b", "A", base_results), base_results)
+    candidate = RunData(make_summary("c", "B", candidate_results), candidate_results)
+    policy = RegressionPolicy(
+        min_paired_cases=10,
+        counts={"max_failed_tests": 1},
+    )
+
+    decision = _decide(base, candidate, policy)
+
+    assert not any(v.rule == "failed_tests" for v in decision.fails)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_metric_comparison_rejects_nonfinite_statistics(value: float) -> None:
+    with pytest.raises(ValidationError):
+        MetricComparison(
+            metric="overall",
+            baseline_mean=0.8,
+            candidate_mean=0.7,
+            delta=value,
+        )
+
+
 def test_metric_threshold_regression() -> None:
     policy = RegressionPolicy(metrics={"token_f1": MetricThreshold(absolute=0.05)})
     base, cand = _runs([0.0] * 12, det_delta=-0.1)
@@ -194,6 +275,21 @@ def test_small_sample_warns() -> None:
     assert any(v.rule == "small_sample" for v in decision.warnings)
 
 
+def test_percentile_interval_alone_does_not_establish_gate_significance() -> None:
+    comparison = MetricComparison(
+        metric="overall",
+        n_paired=10,
+        baseline_mean=0.8,
+        candidate_mean=0.7,
+        delta=-0.1,
+        ci_low=-0.15,
+        ci_high=-0.05,
+        p_value=0.2,
+    )
+
+    assert not _significant(comparison, RegressionPolicy(min_paired_cases=10))
+
+
 def test_one_pair_threshold_drop_warns_without_significance_failure() -> None:
     base, cand = _runs([-0.1], critical_idx=())
     comparison, decision = _compare_and_decide(base, cand)
@@ -203,6 +299,9 @@ def test_one_pair_threshold_drop_warns_without_significance_failure() -> None:
     assert decision.status == "WARNING"
     assert not any(v.rule == "overall_regression" for v in decision.fails)
     assert any(v.rule == "small_sample" for v in decision.warnings)
+    warning = next(v for v in decision.warnings if v.rule == "overall_nonsignificant")
+    assert "1 paired case" in warning.message
+    assert "policy minimum: 10" in warning.message
 
 
 def test_below_minimum_paired_sample_warns_without_significance_failure() -> None:

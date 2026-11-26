@@ -65,7 +65,7 @@ def count_stats(results: Sequence[EvaluationResult]) -> CountStats:
     """Pass/fail/error bookkeeping used by the regression policy."""
     stats = CountStats(total=len(results))
     for result in results:
-        if result.error:
+        if result.error is not None:
             stats.errored += 1
         if result.judge_failed:
             stats.judge_failed += 1
@@ -73,7 +73,7 @@ def count_stats(results: Sequence[EvaluationResult]) -> CountStats:
             stats.passed += 1
         elif result.passed is False:
             stats.failed += 1
-    stats.not_passed = stats.failed + stats.errored
+    stats.not_passed = sum(result.passed is False or result.error is not None for result in results)
     return stats
 
 

@@ -385,7 +385,7 @@ class CountStats(BaseModel):
     failed: int = Field(default=0, ge=0, strict=True)
     errored: int = Field(default=0, ge=0, strict=True)
     judge_failed: int = Field(default=0, ge=0, strict=True)
-    not_passed: int = Field(default=0, ge=0, strict=True)  # failed + errored (what the gate counts)
+    not_passed: int = Field(default=0, ge=0, strict=True)
 
 
 class LatencyStats(BaseModel):
@@ -445,7 +445,13 @@ class RunSummary(BaseModel):
     def _validate_aggregate_counts(self) -> RunSummary:
         if self.counts.total != self.dataset.n_cases:
             raise ValueError("run summary total does not match dataset case count")
-        if self.counts.not_passed != self.counts.failed + self.counts.errored:
+        minimum_not_passed = max(self.counts.failed, self.counts.errored)
+        maximum_not_passed = min(self.counts.total, self.counts.failed + self.counts.errored)
+        legacy_not_passed = self.counts.failed + self.counts.errored
+        if not (
+            minimum_not_passed <= self.counts.not_passed <= maximum_not_passed
+            or self.counts.not_passed == legacy_not_passed
+        ):
             raise ValueError("run summary not_passed count is inconsistent")
         if self.counts.passed + self.counts.failed > self.counts.total:
             raise ValueError("run summary pass/fail counts exceed total")

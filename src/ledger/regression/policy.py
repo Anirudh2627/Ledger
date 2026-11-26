@@ -5,9 +5,11 @@ The policy model validates them and the detector applies them to a
 :class:`~ledger.regression.comparator.ComparisonResult`.
 
 Policy semantics (defaults in brackets):
-  * ``require_significance`` [true] - a degradation only FAILs when the
-    paired bootstrap supports it (CI excludes zero or p < alpha). Degradation
-    beyond a threshold *without* statistical support degrades to WARNING.
+  * ``require_significance`` [true] - a statistical degradation beyond its
+    threshold only FAILs when the paired sign-flip p-value is below alpha and
+    the comparison meets ``min_paired_cases``. Otherwise it degrades to
+    WARNING. CI exclusion is reported separately and does not independently
+    trigger a statistical FAIL; count and integrity rules can FAIL separately.
   * ``overall`` [absolute 0.03, relative null] - allowed drop of the primary
     quality score (0-1 scale) before failing.
   * ``categories`` [absolute 0.05] - per-category allowed drop.

@@ -1,14 +1,14 @@
 """Statistical primitives for regression detection.
 
-Method: **paired percentile bootstrap**.
+Method: paired percentile bootstrap for confidence intervals and paired
+sign-flip permutation for hypothesis-test p-values.
 
 Baseline and candidate are evaluated on the *same* dataset, so per-case
-scores form natural pairs. Resampling case indices (with replacement) and
-recomputing the mean difference for each resample yields a distribution of
-the delta under the empirical data-generating process; the percentile
-interval of that distribution is a confidence interval for the true mean
-delta, and the fraction of resamples on the other side of zero gives a
-bootstrap p-value.
+scores form natural pairs. Resampling case indices (with replacement)
+estimates the confidence interval for the mean difference. The p-value is
+computed separately from the null distribution formed by sign-flipping paired
+differences; this test is exact when pairwise differences are exchangeable
+under the null.
 
 Also provided: an exact two-sided **sign test** on pass/fail flips, which
 makes no distributional assumptions at all.
@@ -23,6 +23,8 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from numbers import Real
+from operator import index
 
 import numpy as np
 
@@ -32,6 +34,53 @@ EPS = 1e-12
 
 class InsufficientDataError(ValueError):
     """Raised when there is not enough paired data to run statistics."""
+
+
+def _finite_array(values: Sequence[float], label: str) -> np.ndarray:
+    try:
+        items = list(values)
+    except TypeError as exc:
+        raise InsufficientDataError(f"{label} must be a sequence of finite numbers") from exc
+    if any(isinstance(value, bool) or not isinstance(value, Real) for value in items):
+        raise InsufficientDataError(f"{label} must contain finite numeric values")
+    try:
+        array = np.asarray(items, dtype=np.float64)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise InsufficientDataError(f"{label} must contain finite numeric values") from exc
+    if array.ndim != 1 or not np.all(np.isfinite(array)):
+        raise InsufficientDataError(f"{label} must contain finite numeric values")
+    return array
+
+
+def _stable_mean(values: np.ndarray, label: str) -> float:
+    scale = float(np.max(np.abs(values))) if values.size else 0.0
+    if not math.isfinite(scale):
+        raise InsufficientDataError(f"{label} must remain finite")
+    if scale == 0.0:
+        return 0.0
+    mean = float(np.mean(values / scale)) * scale
+    if not math.isfinite(mean):
+        raise InsufficientDataError(f"{label} must remain finite")
+    return mean
+
+
+def _paired_permutation_p_value(differences: np.ndarray, *, n_samples: int, seed: int) -> float:
+    """Two-sided sign-flip test, exact through 16 pairs and Monte Carlo beyond."""
+    n = len(differences)
+    observed = abs(float(np.mean(differences)))
+    if n <= 16:
+        masks = np.arange(1 << n, dtype=np.uint32)[:, None]
+        bits = np.arange(n, dtype=np.uint32)
+        signs = 1.0 - 2.0 * ((masks >> bits) & 1)
+        permuted_means = signs @ differences / n
+        extreme = np.count_nonzero(np.abs(permuted_means) >= observed - EPS)
+        return float(extreme / len(permuted_means))
+
+    rng = np.random.default_rng(seed)
+    signs = rng.integers(0, 2, size=(n_samples, n), dtype=np.int8) * 2 - 1
+    permuted_means = (signs * differences).mean(axis=1)
+    extreme = np.count_nonzero(np.abs(permuted_means) >= observed - EPS)
+    return float((extreme + 1) / (n_samples + 1))
 
 
 @dataclass(frozen=True)
@@ -47,6 +96,7 @@ class BootstrapResult:
     seed: int
     confidence: float
     method: str = "paired_percentile_bootstrap"
+    p_value_method: str = "paired_sign_flip_permutation"
 
     @property
     def excludes_zero(self) -> bool:
@@ -72,12 +122,12 @@ def paired_bootstrap(
     confidence: float = 0.95,
     seed: int = 1337,
 ) -> BootstrapResult:
-    """Paired percentile bootstrap of the mean difference.
+    """Estimate a paired mean-difference interval and test by sign-flip permutation.
 
     Args:
         baseline: per-case baseline scores.
         candidate: per-case candidate scores (same order/length: pairs).
-        n_samples: bootstrap resamples (>= 200 recommended for stable CIs).
+        n_samples: bootstrap and Monte Carlo permutation resamples.
         confidence: CI level in (0, 1), e.g. 0.95.
         seed: RNG seed - results are exactly reproducible.
 
@@ -91,34 +141,46 @@ def paired_bootstrap(
     n = len(baseline)
     if n == 0:
         raise InsufficientDataError("paired bootstrap needs at least one pair")
-    if not 0.0 < confidence < 1.0:
+    if isinstance(confidence, bool) or not isinstance(confidence, Real):
         raise ValueError("confidence must be in (0, 1)")
+    if not math.isfinite(confidence) or not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be in (0, 1)")
+    if isinstance(n_samples, bool):
+        raise ValueError("n_samples must be >= 1")
+    try:
+        n_samples = index(n_samples)
+    except TypeError as exc:
+        raise ValueError("n_samples must be a positive integer") from exc
     if n_samples < 1:
         raise ValueError("n_samples must be >= 1")
 
-    base = np.asarray(baseline, dtype=np.float64)
-    cand = np.asarray(candidate, dtype=np.float64)
-    if not np.all(np.isfinite(base)) or not np.all(np.isfinite(cand)):
-        raise InsufficientDataError("scores contain non-finite values")
+    base = _finite_array(baseline, "baseline scores")
+    cand = _finite_array(candidate, "candidate scores")
 
-    diffs = cand - base
-    point_delta = float(diffs.mean())
+    with np.errstate(over="ignore", invalid="ignore"):
+        diffs = cand - base
+    if not np.all(np.isfinite(diffs)):
+        raise InsufficientDataError("paired differences must remain finite")
+    scale = float(np.max(np.abs(diffs)))
+    scaled_diffs = diffs / scale if scale else diffs
+    mean_scaled = float(np.mean(scaled_diffs)) if scale else 0.0
+    point_delta = mean_scaled * scale if scale else 0.0
+    if not math.isfinite(point_delta):
+        raise InsufficientDataError("paired mean difference must remain finite")
 
     rng = np.random.default_rng(seed)
     # One (n_samples, n) index matrix; same indices for both arms => paired.
     idx = rng.integers(0, n, size=(n_samples, n))
-    boot_deltas = diffs[idx].mean(axis=1)
+    boot_deltas = scaled_diffs[idx].mean(axis=1)
 
     alpha = 1.0 - confidence
-    ci_low, ci_high = (
+    ci_low_scaled, ci_high_scaled = (
         float(v) for v in np.percentile(boot_deltas, [100 * alpha / 2, 100 * (1 - alpha / 2)])
     )
-
-    frac_le0 = float(np.mean(boot_deltas <= 0))
-    frac_ge0 = float(np.mean(boot_deltas >= 0))
-    p_value = min(1.0, 2.0 * min(frac_le0, frac_ge0))
-    # Report a floor instead of an impossible exact zero.
-    p_value = max(p_value, 1.0 / n_samples)
+    ci_low, ci_high = ci_low_scaled * scale, ci_high_scaled * scale
+    if not all(math.isfinite(value) for value in (ci_low, ci_high)):
+        raise InsufficientDataError("bootstrap confidence interval must remain finite")
+    p_value = _paired_permutation_p_value(scaled_diffs, n_samples=n_samples, seed=seed)
 
     return BootstrapResult(
         n=n,
@@ -177,9 +239,15 @@ def means(
     baseline: Sequence[float], candidate: Sequence[float]
 ) -> tuple[float, float, float, float | None]:
     """(baseline_mean, candidate_mean, absolute delta, relative delta)."""
-    if not baseline or not candidate:
+    if len(baseline) == 0 or len(candidate) == 0:
         raise InsufficientDataError("cannot compute means of empty sequences")
-    b = float(np.mean(baseline))
-    c = float(np.mean(candidate))
-    rel = (c - b) / abs(b) if abs(b) > EPS else None
-    return b, c, c - b, rel
+    base = _finite_array(baseline, "baseline scores")
+    cand = _finite_array(candidate, "candidate scores")
+    b = _stable_mean(base, "baseline mean")
+    c = _stable_mean(cand, "candidate mean")
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        delta = c - b
+        rel = delta / abs(b) if abs(b) > EPS else None
+    if not math.isfinite(delta) or (rel is not None and not math.isfinite(rel)):
+        raise InsufficientDataError("mean difference and relative change must remain finite")
+    return b, c, delta, rel

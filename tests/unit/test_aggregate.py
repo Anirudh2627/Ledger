@@ -86,6 +86,14 @@ def test_count_stats_judge_failures() -> None:
     assert counts.judge_failed == 1
 
 
+def test_count_stats_counts_an_errored_case_as_not_passed_once() -> None:
+    counts = count_stats([make_result("t1", overall=0.0, passed=False, error="SUT failed")])
+
+    assert counts.failed == 1
+    assert counts.errored == 1
+    assert counts.not_passed == 1
+
+
 def test_latency_stats() -> None:
     stats = latency_stats(_sample_results())
     assert stats.mean_ms == pytest.approx(20.0)

@@ -79,6 +79,8 @@ def test_report_structure(regressed_report: Report) -> None:
     assert report.schema_version == "1.0"
     assert report.baseline.system_version == "A"
     assert report.candidate.system_version == "B"
+    assert report.candidate.passed == N
+    assert report.candidate.undecided == 0
     assert report.decision.status == "FAIL"
     assert report.comparison.overall is not None
     assert report.comparison.overall.delta == pytest.approx(-0.1, abs=1e-6)
@@ -97,10 +99,15 @@ def test_markdown_rendering(regressed_report: Report) -> None:
     assert "# Ledger Evaluation Report" in markdown
     assert "FAIL" in markdown
     assert "| **overall** |" in markdown
+    assert "| CI excludes 0? |" in markdown
     assert "## Categories" in markdown
     assert "critical cases" in markdown
     assert "## Gate decision" in markdown
     assert "overall_regression" in markdown  # violated rule id
+    assert "minimum paired sample" in markdown
+    assert "paired_sign_flip_permutation p-value" in markdown
+    assert "metric-table bootstrap significance marker indicates CI exclusion only" in markdown
+    assert "Candidate outcomes: 12 passed; 0 not passed; 0 undecided" in markdown
     assert "## Top regressed cases" in markdown
     assert "paired_percentile" in markdown  # method disclosure
 
@@ -118,6 +125,14 @@ def test_json_rendering_round_trip(regressed_report: Report) -> None:
     parsed = json.loads(payload)
     assert parsed["decision"]["status"] == "FAIL"
     assert parsed["baseline"]["system_version"] == "A"
+    method = parsed["comparison"]["method"]
+    assert method["metric_significance_flags"] == (
+        "significant_regression and significant_improvement indicate CI exclusion only"
+    )
+    assert method["gate_significance"] == (
+        "see decision.status and decision.violations; when require_significance is true, "
+        "statistical threshold FAILs use the paired sign-flip p-value and min_paired_cases"
+    )
     restored = Report.model_validate_json(payload)
     assert restored == regressed_report
 
@@ -141,6 +156,60 @@ def test_console_rendering_smoke(regressed_report: Report) -> None:
     assert "Candidate:" in output
     assert "Decision:" in output
     assert "FAIL" in output
+
+
+def test_console_reports_undecided_cases_separately() -> None:
+    base_results = [make_result("t1", run_id="b", system_version="A")]
+    candidate_results = [
+        make_result(
+            "t1",
+            overall=None,
+            passed=None,
+            run_id="c",
+            system_version="B",
+        )
+    ]
+    base = RunData(make_summary("b", "A", base_results), base_results)
+    candidate = RunData(make_summary("c", "B", candidate_results), candidate_results)
+    comparison = compare_runs(base, candidate, n_samples=200, seed=3)
+    decision = detect_regressions(comparison, base.summary, candidate.summary, RegressionPolicy())
+    report = build_report(comparison, decision, base, candidate)
+    buffer = io.StringIO()
+
+    render_console(report, console=Console(file=buffer, width=100, force_terminal=False))
+
+    output = buffer.getvalue()
+    assert "Passed (candidate):   0" in output
+    assert "Not passed (candidate): 0" in output
+    assert "Undecided (candidate): 1" in output
+
+
+def test_console_counts_error_as_failed_once() -> None:
+    base_results = [make_result("t1", run_id="b", system_version="A")]
+    candidate_results = [
+        make_result(
+            "t1",
+            overall=0.0,
+            passed=False,
+            error="SUT failed",
+            run_id="c",
+            system_version="B",
+        )
+    ]
+    base = RunData(make_summary("b", "A", base_results), base_results)
+    candidate = RunData(make_summary("c", "B", candidate_results), candidate_results)
+    comparison = compare_runs(base, candidate, n_samples=200, seed=3)
+    decision = detect_regressions(comparison, base.summary, candidate.summary, RegressionPolicy())
+    report = build_report(comparison, decision, base, candidate)
+    buffer = io.StringIO()
+
+    render_console(report, console=Console(file=buffer, width=100, force_terminal=False))
+
+    output = buffer.getvalue()
+    assert "Passed (candidate):   0" in output
+    assert "Not passed (candidate): 1" in output
+    assert "Failed decisions:     1; errors: 1" in output
+    assert "Undecided (candidate): 0" in output
 
 
 def test_run_markdown_rendering() -> None:

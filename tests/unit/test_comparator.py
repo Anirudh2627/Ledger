@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from ledger.core.models import RunSummary
 from ledger.regression.comparator import RunData, compare_runs
 from tests.helpers import make_result, make_summary
 
@@ -120,6 +121,26 @@ def test_missing_cases_on_one_side() -> None:
     statuses = {c.test_id: c.status for c in comp.cases}
     assert statuses["t10"] == "baseline_only"
     assert any(w.startswith("2 cases present only in baseline") for w in comp.warnings)
+
+
+def test_legacy_error_counts_are_normalized_when_loading_a_run() -> None:
+    results = [
+        make_result(
+            "error",
+            overall=0.0,
+            passed=False,
+            error="SUT failed",
+            run_id="run",
+            system_version="A",
+        )
+    ]
+    summary_payload = make_summary("run", "A", results).model_dump()
+    summary_payload["counts"]["not_passed"] = 2
+    legacy_summary = RunSummary.model_validate(summary_payload)
+
+    loaded = RunData(legacy_summary, results)
+
+    assert loaded.summary.counts.not_passed == 1
 
 
 def test_dataset_fingerprint_mismatch_warns() -> None:

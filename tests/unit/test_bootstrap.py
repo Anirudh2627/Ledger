@@ -38,8 +38,7 @@ def test_constant_shift_is_significant_improvement() -> None:
     assert result.ci_high == pytest.approx(0.1)
     assert result.significant_improvement
     assert not result.significant_regression
-    # p-value floors at 1/n_samples instead of reporting impossible 0
-    assert result.p_value == pytest.approx(1.0 / 1000)
+    assert result.p_value == pytest.approx(1.0 / 1001)
 
 
 def test_constant_regression_is_significant() -> None:
@@ -96,6 +95,80 @@ def test_input_validation() -> None:
         paired_bootstrap([1.0], [1.0], confidence=1.5)
     with pytest.raises(ValueError):
         paired_bootstrap([1.0], [1.0], n_samples=0)
+
+
+def test_extreme_finite_values_cannot_produce_nonfinite_statistics() -> None:
+    with pytest.raises(InsufficientDataError, match="finite"):
+        paired_bootstrap([-1e308], [1e308], n_samples=10)
+    with pytest.raises(InsufficientDataError, match="finite"):
+        means([-1e308], [1e308])
+    with pytest.raises(InsufficientDataError, match="finite"):
+        means([float("nan")], [1.0])
+    with pytest.raises(InsufficientDataError, match="finite"):
+        paired_bootstrap([True], [False], n_samples=10)
+
+
+def test_bootstrap_requires_integer_sample_count() -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        paired_bootstrap([0.1], [0.2], n_samples=1.5)
+
+
+def test_p_value_uses_exact_paired_sign_flip_permutation() -> None:
+    differences = np.array([0.01, 0.02, -0.03, 0.04, 0.05, -0.02, 0.08, -0.01, 0.03, -0.05])
+    n_samples = 400
+    seed = 27
+    result = paired_bootstrap(
+        np.zeros(len(differences)).tolist(),
+        differences.tolist(),
+        n_samples=n_samples,
+        seed=seed,
+    )
+
+    indices = np.random.default_rng(seed).integers(
+        0, len(differences), size=(n_samples, len(differences))
+    )
+    bootstrap_samples = differences[indices]
+    bootstrap_means = bootstrap_samples.mean(axis=1)
+    expected_ci = np.percentile(bootstrap_means, [2.5, 97.5])
+    masks = np.arange(1 << len(differences), dtype=np.uint32)[:, None]
+    bits = np.arange(len(differences), dtype=np.uint32)
+    signs = 1.0 - 2.0 * ((masks >> bits) & 1)
+    permuted_means = signs @ differences / len(differences)
+    expected_p = np.count_nonzero(
+        np.abs(permuted_means) >= abs(float(differences.mean())) - 1e-12
+    ) / (1 << len(differences))
+
+    assert result.p_value == pytest.approx(expected_p)
+    assert result.ci_low == pytest.approx(expected_ci[0], abs=1e-5)
+    assert result.ci_high == pytest.approx(expected_ci[1], abs=1e-5)
+    assert result.method == "paired_percentile_bootstrap"
+    assert result.p_value_method == "paired_sign_flip_permutation"
+
+
+def test_large_sample_p_value_uses_seeded_monte_carlo_permutations() -> None:
+    differences = np.linspace(-0.2, 0.4, 20)
+    n_samples = 300
+    seed = 12
+    result = paired_bootstrap(
+        np.zeros(len(differences)).tolist(),
+        differences.tolist(),
+        n_samples=n_samples,
+        seed=seed,
+    )
+
+    signs = (
+        np.random.default_rng(seed).integers(
+            0, 2, size=(n_samples, len(differences)), dtype=np.int8
+        )
+        * 2
+        - 1
+    )
+    permuted_means = (signs * differences).mean(axis=1)
+    expected_p = (
+        np.count_nonzero(np.abs(permuted_means) >= abs(float(differences.mean())) - 1e-12) + 1
+    ) / (n_samples + 1)
+
+    assert result.p_value == pytest.approx(expected_p)
 
 
 # ---------------------------------------------------------------------------

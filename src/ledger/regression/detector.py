@@ -102,16 +102,9 @@ def _exceeds(
 
 
 def _significant(comparison: MetricComparison, policy: RegressionPolicy) -> bool:
-    """Statistical support for a directional change."""
+    """Use the paired sign-flip test, not the interval estimate, for gates."""
     if comparison.n_paired < policy.min_paired_cases:
         return False
-    ci_conclusive = (
-        comparison.ci_high is not None
-        and comparison.ci_low is not None
-        and (comparison.ci_high < 0 or comparison.ci_low > 0)
-    )
-    if ci_conclusive:
-        return True
     return comparison.p_value is not None and comparison.p_value < policy.significance_alpha
 
 
@@ -123,6 +116,20 @@ def _fmt_ci(comparison: MetricComparison) -> str:
     if comparison.ci_low is None or comparison.ci_high is None:
         return "n/a"
     return f"[{comparison.ci_low:+.4f}, {comparison.ci_high:+.4f}]"
+
+
+def _support_explanation(comparison: MetricComparison, policy: RegressionPolicy) -> str:
+    if comparison.n_paired < policy.min_paired_cases:
+        return (
+            f"has only {comparison.n_paired} paired case(s) "
+            f"(policy minimum: {policy.min_paired_cases}); "
+            f"CI {_fmt_ci(comparison)}, sign-flip p={comparison.p_value}"
+        )
+    return (
+        f"has paired sign-flip p={comparison.p_value} "
+        f"(required: < {policy.significance_alpha}); "
+        f"CI {_fmt_ci(comparison)} is the separate interval estimate"
+    )
 
 
 def detect_regressions(
@@ -221,7 +228,7 @@ def detect_regressions(
             add_warning(
                 "metric_nonsignificant",
                 f"metric '{metric_name}' degraded {_fmt_delta(metric_comp.delta)} beyond "
-                f"threshold but is not statistically supported (CI {_fmt_ci(metric_comp)})",
+                f"threshold but {_support_explanation(metric_comp, policy)}",
                 metric=metric_name,
                 delta=metric_comp.delta,
             )
@@ -359,7 +366,7 @@ def _apply_threshold_rule(
             add_warning(
                 f"{rule_prefix}_nonsignificant",
                 f"{label} degraded {_fmt_delta(comp.delta)} beyond the configured threshold "
-                f"but lacks statistical support (CI {_fmt_ci(comp)}, p={comp.p_value})",
+                f"but {_support_explanation(comp, policy)}",
                 delta=comp.delta,
                 **extra,
             )
@@ -375,11 +382,22 @@ def _apply_threshold_rule(
                 p_value=comp.p_value,
                 **extra,
             )
-    elif drop > group.absolute * group.warning_fraction:
-        add_warning(
-            f"{rule_prefix}_warning_band",
-            f"{label} degraded {_fmt_delta(comp.delta)}, approaching the fail threshold "
-            f"({group.absolute:.3f})",
-            delta=comp.delta,
-            **extra,
-        )
+    else:
+        warning_thresholds = []
+        if drop > group.absolute * group.warning_fraction:
+            warning_thresholds.append(f"absolute {group.absolute:.3f}")
+        relative_drop = _relative_drop(comp)
+        if (
+            group.relative is not None
+            and relative_drop is not None
+            and relative_drop > group.relative * group.warning_fraction
+        ):
+            warning_thresholds.append(f"relative {group.relative:.1%}")
+        if warning_thresholds:
+            add_warning(
+                f"{rule_prefix}_warning_band",
+                f"{label} degraded {_fmt_delta(comp.delta)}, approaching the fail "
+                f"threshold ({', '.join(warning_thresholds)})",
+                delta=comp.delta,
+                **extra,
+            )

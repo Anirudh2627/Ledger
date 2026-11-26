@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from math import isclose
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ledger.config.settings import LedgerConfig
 from ledger.core.models import EvaluationResult, RunSummary, validate_result_integrity
@@ -62,16 +62,28 @@ class MetricComparison(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     metric: str
-    n_paired: int = 0
-    baseline_mean: float
-    candidate_mean: float
-    delta: float
-    relative_delta: float | None = None
-    ci_low: float | None = None
-    ci_high: float | None = None
-    p_value: float | None = None
-    significant_regression: bool = False
-    significant_improvement: bool = False
+    n_paired: int = Field(default=0, ge=0, strict=True)
+    baseline_mean: float = Field(allow_inf_nan=False)
+    candidate_mean: float = Field(allow_inf_nan=False)
+    delta: float = Field(allow_inf_nan=False)
+    relative_delta: float | None = Field(default=None, allow_inf_nan=False)
+    ci_low: float | None = Field(default=None, allow_inf_nan=False)
+    ci_high: float | None = Field(default=None, allow_inf_nan=False)
+    p_value: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
+    significant_regression: bool = Field(
+        default=False,
+        description="CI-exclusion indicator only; does not determine gate significance.",
+    )
+    significant_improvement: bool = Field(
+        default=False,
+        description="CI-exclusion indicator only; does not determine gate significance.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_interval(self) -> MetricComparison:
+        if self.ci_low is not None and self.ci_high is not None and self.ci_low > self.ci_high:
+            raise ValueError("confidence interval lower bound must not exceed its upper bound")
+        return self
 
 
 class CaseDelta(BaseModel):
@@ -146,8 +158,16 @@ class RunData:
             for result in self.results
         ):
             raise ValueError("result run identity does not match run summary")
-        if self.summary.counts != count_stats(self.results):
-            raise ValueError("run summary counts do not match result rows")
+        expected_counts = count_stats(self.results)
+        if self.summary.counts != expected_counts:
+            legacy_counts = expected_counts.model_copy(
+                update={
+                    "not_passed": expected_counts.failed + expected_counts.errored,
+                }
+            )
+            if self.summary.counts != legacy_counts:
+                raise ValueError("run summary counts do not match result rows")
+            self.summary.counts = expected_counts
         expected_metrics = {
             name: round(value, 6) for name, value in metric_means(self.results).items()
         }
@@ -345,6 +365,14 @@ def compare_runs(
         n_common=len(common_ids),
         method={
             "bootstrap": "paired_percentile",
+            "p_value": "paired_sign_flip_permutation",
+            "metric_significance_flags": (
+                "significant_regression and significant_improvement indicate CI exclusion only"
+            ),
+            "gate_significance": (
+                "see decision.status and decision.violations; when require_significance is true, "
+                "statistical threshold FAILs use the paired sign-flip p-value and min_paired_cases"
+            ),
             "n_samples": n_samples,
             "confidence": confidence,
             "seed": seed,
